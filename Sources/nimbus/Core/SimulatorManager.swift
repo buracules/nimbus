@@ -54,7 +54,9 @@ enum SimulatorManager {
     static func findDevice(name: String, os: String? = nil) throws -> (device: Device, runtime: String)? {
         let groups = try listDevices()
         for group in groups {
-            if let os = os, !group.runtime.contains(os) {
+            if let os = os,
+               !group.runtime.contains(os),
+               !group.runtime.contains(os.replacingOccurrences(of: ".", with: "-")) {
                 continue
             }
             if let device = group.devices.first(where: { $0.name == name }) {

@@ -12,15 +12,7 @@ struct RunCommand: ParsableCommand {
     mutating func run() throws {
         let config = try options.resolvedConfig()
 
-        // Step 1: Build
-        Console.step("Building \(config.scheme ?? "project")...")
-        let runner = XcodeBuildRunner(config: config, verbose: options.verbose)
-        let buildSuccess = try runner.execute(action: .build)
-        guard buildSuccess else {
-            throw ExitCode.failure
-        }
-
-        // Step 2: Find simulator
+        // Step 1: Find simulator first so we can use its UDID as the build destination
         let deviceName = config.device ?? "iPhone 17"
         Console.step("Finding simulator \"\(deviceName)\"...")
 
@@ -30,6 +22,18 @@ struct RunCommand: ParsableCommand {
         }
 
         Console.verbose("Found: \(match.device.name) (\(match.device.udid))", isVerbose: options.verbose)
+
+        // Step 2: Build using the simulator UDID for a reliable destination match
+        Console.step("Building \(config.scheme ?? "project")...")
+        let runner = XcodeBuildRunner(
+            config: config,
+            verbose: options.verbose,
+            destinationUDID: match.device.udid
+        )
+        let buildSuccess = try runner.execute(action: .build)
+        guard buildSuccess else {
+            throw ExitCode.failure
+        }
 
         // Step 3: Boot simulator
         Console.step("Booting simulator...")

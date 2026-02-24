@@ -4,6 +4,7 @@ import Foundation
 struct XcodeBuildRunner {
     let config: NimbusConfig
     let verbose: Bool
+    var destinationUDID: String? = nil
 
     enum Action: String {
         case build
@@ -66,7 +67,12 @@ struct XcodeBuildRunner {
             return false
         }
 
-        let destination = simulatorDestination(device: config.device, os: config.os)
+        let destination: String?
+        if let udid = destinationUDID {
+            destination = "platform=iOS Simulator,id=\(udid)"
+        } else {
+            destination = simulatorDestination(device: config.device, os: config.os)
+        }
         let args = try buildArguments(for: action, destination: destination)
 
         Console.verbose("xcodebuild \(args.joined(separator: " "))", isVerbose: verbose)
@@ -116,7 +122,7 @@ struct XcodeBuildRunner {
         let pipe = Pipe()
         xcodeBuildProcess.standardOutput = pipe
         xcodeBuildProcess.standardError = pipe
-        xcbeautifyProcess.standardInput = pipe
+        xcbeautifyProcess.standardInput = pipe.fileHandleForReading
 
         xcbeautifyProcess.standardOutput = FileHandle.standardOutput
         xcbeautifyProcess.standardError = FileHandle.standardError
@@ -124,9 +130,11 @@ struct XcodeBuildRunner {
         try xcodeBuildProcess.run()
         try xcbeautifyProcess.run()
 
-        xcodeBuildProcess.waitUntilExit()
-        // Close the write end so xcbeautify sees EOF
+        // Close the parent's copy of the write end immediately.
+        // Only xcodebuild needs it — once it exits, xcbeautify will see EOF.
         pipe.fileHandleForWriting.closeFile()
+
+        xcodeBuildProcess.waitUntilExit()
         xcbeautifyProcess.waitUntilExit()
 
         let success = xcodeBuildProcess.terminationStatus == 0
