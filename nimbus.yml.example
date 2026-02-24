@@ -1,0 +1,12 @@
+# nimbus.yml — place in your project root
+# All fields are optional. Nimbus auto-detects what it can.
+#
+# You can also set global defaults at ~/.config/nimbus/config.yml
+# Generate one with: nimbus init --global
+
+project: MyApp.xcodeproj       # or workspace: MyApp.xcworkspace
+scheme: MyApp
+device: "iPhone 17"
+os: "26.2"
+configuration: Debug
+xcbeautify: true               # true/false/omit for auto-detect
