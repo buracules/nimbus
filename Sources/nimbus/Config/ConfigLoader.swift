@@ -26,12 +26,16 @@ enum ConfigLoader {
     }
 
     /// Load and parse the global config from ~/.config/nimbus/config.yml.
+    /// Note: Global config should not include project/workspace/scheme as those are auto-detected
+    /// per directory (important for worktrees to work correctly).
     static func loadGlobal() throws -> NimbusConfig {
         let path = globalConfigPath
         guard FileManager.default.fileExists(atPath: path) else {
             return .empty
         }
-        return try loadFile(at: path)
+        let config = try loadFile(at: path)
+        // Strip project-specific fields to ensure worktree compatibility
+        return config.globalOnly()
     }
 
     /// Load and parse the project nimbus.yml from the given directory (walking up).

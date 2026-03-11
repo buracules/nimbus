@@ -16,7 +16,8 @@ final class ConfigLoaderTests: XCTestCase {
     }
 
     func testLoadMissingFile() throws {
-        let config = try ConfigLoader.load(from: tempDir)
+        // Test project config loading only (no global config)
+        let config = try ConfigLoader.loadProject(from: tempDir)
         XCTAssertEqual(config, NimbusConfig.empty)
     }
 
@@ -73,7 +74,8 @@ final class ConfigLoaderTests: XCTestCase {
         let path = tempDir + "/nimbus.yml"
         try "".write(toFile: path, atomically: true, encoding: .utf8)
 
-        let config = try ConfigLoader.load(from: tempDir)
+        // Test project config loading only (no global config)
+        let config = try ConfigLoader.loadProject(from: tempDir)
         XCTAssertEqual(config, NimbusConfig.empty)
     }
 
@@ -190,5 +192,44 @@ final class ConfigLoaderTests: XCTestCase {
         XCTAssertEqual(merged.os, "18.0", "Global os preserved (neither project nor CLI set it)")
         XCTAssertEqual(merged.configuration, "Debug", "Project config wins over global")
         XCTAssertEqual(merged.xcbeautify, true, "Global xcbeautify preserved")
+    }
+
+    func testLoadGlobalStripsProjectSpecificFields() throws {
+        // Test that even if someone manually adds project/workspace/scheme to global config,
+        // loadGlobal() strips them out for worktree compatibility
+        let globalDir = tempDir + "/.config/nimbus"
+        try FileManager.default.createDirectory(atPath: globalDir, withIntermediateDirectories: true)
+
+        let yaml = """
+        project: MyApp.xcodeproj
+        workspace: MyApp.xcworkspace
+        scheme: MyApp
+        device: "iPhone 17"
+        os: "26.2"
+        configuration: Debug
+        xcbeautify: true
+        """
+        let globalPath = globalDir + "/config.yml"
+        try yaml.write(toFile: globalPath, atomically: true, encoding: .utf8)
+
+        // Load using loadFile (raw load, no stripping)
+        let rawConfig = try ConfigLoader.loadFile(at: globalPath)
+        XCTAssertEqual(rawConfig.project, "MyApp.xcodeproj", "Raw load should include project")
+        XCTAssertEqual(rawConfig.workspace, "MyApp.xcworkspace", "Raw load should include workspace")
+        XCTAssertEqual(rawConfig.scheme, "MyApp", "Raw load should include scheme")
+
+        // Now simulate loadGlobal behavior by calling globalOnly()
+        let globalConfig = rawConfig.globalOnly()
+
+        // Verify project-specific fields are stripped
+        XCTAssertNil(globalConfig.project, "Global config should strip project for worktree compatibility")
+        XCTAssertNil(globalConfig.workspace, "Global config should strip workspace for worktree compatibility")
+        XCTAssertNil(globalConfig.scheme, "Global config should strip scheme for worktree compatibility")
+
+        // Verify user preferences are kept
+        XCTAssertEqual(globalConfig.device, "iPhone 17")
+        XCTAssertEqual(globalConfig.os, "26.2")
+        XCTAssertEqual(globalConfig.configuration, "Debug")
+        XCTAssertEqual(globalConfig.xcbeautify, true)
     }
 }

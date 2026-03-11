@@ -103,4 +103,29 @@ final class NimbusConfigTests: XCTestCase {
                              device: nil, os: nil, configuration: nil, xcbeautify: nil)
         XCTAssertEqual(a, b)
     }
+
+    func testGlobalOnlyStripsProjectSpecificFields() {
+        let config = NimbusConfig(
+            project: "MyApp.xcodeproj",
+            workspace: "MyApp.xcworkspace",
+            scheme: "MyApp",
+            device: "iPhone 17",
+            os: "26.2",
+            configuration: "Debug",
+            xcbeautify: true
+        )
+
+        let globalConfig = config.globalOnly()
+
+        // Global config should strip project-specific fields for worktree compatibility
+        XCTAssertNil(globalConfig.project, "project should be stripped from global config")
+        XCTAssertNil(globalConfig.workspace, "workspace should be stripped from global config")
+        XCTAssertNil(globalConfig.scheme, "scheme should be stripped from global config")
+
+        // Global config should keep user preferences
+        XCTAssertEqual(globalConfig.device, "iPhone 17", "device should be kept in global config")
+        XCTAssertEqual(globalConfig.os, "26.2", "os should be kept in global config")
+        XCTAssertEqual(globalConfig.configuration, "Debug", "configuration should be kept in global config")
+        XCTAssertEqual(globalConfig.xcbeautify, true, "xcbeautify should be kept in global config")
+    }
 }

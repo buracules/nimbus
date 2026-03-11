@@ -35,13 +35,17 @@ struct InitCommand: ParsableCommand {
             try FileManager.default.createDirectory(atPath: configDir, withIntermediateDirectories: true)
         }
 
+        // Global config should only contain user preferences, not project-specific paths
         var config = NimbusConfig.empty
         config.configuration = "Debug"
+        // Note: project, workspace, and scheme are intentionally omitted
+        // They should be auto-detected per directory (works correctly in worktrees)
 
         let yaml = config.toYAML()
         try yaml.write(toFile: configPath, atomically: true, encoding: .utf8)
 
         Console.success("Generated global config: \(configPath)")
+        Console.info("Note: project/workspace/scheme are auto-detected per directory")
         print()
         print(yaml)
     }

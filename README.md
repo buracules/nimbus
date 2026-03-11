@@ -65,7 +65,7 @@ Set defaults across all projects with a global config at `~/.config/nimbus/confi
 nimbus init --global
 ```
 
-The global config uses the same format as the project config. This is useful for settings like `device`, `os`, `configuration`, and `xcbeautify` that you want as defaults everywhere.
+The global config should only contain **user preferences** like `device`, `os`, `configuration`, and `xcbeautify`. Project-specific fields (`project`, `workspace`, `scheme`) should NOT be in global config — they're auto-detected from each directory, which ensures everything works correctly in git worktrees.
 
 **Priority chain**: CLI flags > project `nimbus.yml` > global `~/.config/nimbus/config.yml` > auto-detected > defaults
 
