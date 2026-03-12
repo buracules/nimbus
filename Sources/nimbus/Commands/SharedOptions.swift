@@ -49,9 +49,31 @@ struct SharedOptions: ParsableArguments {
                 projectFlag: projectFile?.flag,
                 projectValue: projectFile?.value
             )
-            if let first = schemes.first {
-                merged.scheme = first
-                Console.verbose("Auto-detected scheme: \(first)", isVerbose: verbose)
+
+            // Prefer scheme that matches the project/workspace name
+            var selectedScheme: String?
+            if let projectName = projectFile?.value {
+                let baseName = (projectName as NSString).deletingPathExtension
+                // First try exact match
+                if let match = schemes.first(where: { $0 == baseName }) {
+                    selectedScheme = match
+                }
+                // Then try prefix match (e.g., "MyApp" matches "MyApp-Debug")
+                else if let match = schemes.first(where: { $0.hasPrefix(baseName) }) {
+                    selectedScheme = match
+                }
+            }
+            // Fall back to first non-dependency scheme (skip common SPM dependency names)
+            if selectedScheme == nil {
+                let dependencyPrefixes = ["Facebook", "FBSDK", "Firebase", "Google", "Adjust"]
+                selectedScheme = schemes.first { scheme in
+                    !dependencyPrefixes.contains { scheme.hasPrefix($0) }
+                } ?? schemes.first
+            }
+
+            if let selected = selectedScheme {
+                merged.scheme = selected
+                Console.verbose("Auto-detected scheme: \(selected)", isVerbose: verbose)
             }
         }
 

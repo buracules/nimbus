@@ -66,6 +66,91 @@ enum SimulatorManager {
         return nil
     }
 
+    /// Find a device with intelligent fallback when exact match isn't found.
+    ///
+    /// Priority order:
+    /// 1. Exact name + OS match (if both specified)
+    /// 2. Any booted device matching OS (if OS specified)
+    /// 3. Any booted device
+    /// 4. First available device matching OS (if OS specified)
+    /// 5. First available device
+    ///
+    /// - Parameters:
+    ///   - name: Optional device name to search for
+    ///   - os: Optional OS version to filter by
+    /// - Returns: A tuple of (device, runtime) or nil if no devices exist
+    static func findDeviceWithFallback(name: String?, os: String?) throws -> (device: Device, runtime: String)? {
+        let groups = try listDevices()
+
+        // No devices available at all
+        if groups.isEmpty {
+            return nil
+        }
+
+        // Try exact match first if name provided
+        if let name = name, let match = try findDevice(name: name, os: os) {
+            return match
+        }
+
+        // Try booted device matching OS
+        if let os = os {
+            for group in groups {
+                if group.runtime.contains(os) || group.runtime.contains(os.replacingOccurrences(of: ".", with: "-")) {
+                    if let device = group.devices.first(where: { $0.isBooted }) {
+                        return (device, group.runtime)
+                    }
+                }
+            }
+        }
+
+        // Try any booted device
+        for group in groups {
+            if let device = group.devices.first(where: { $0.isBooted }) {
+                return (device, group.runtime)
+            }
+        }
+
+        // Try first available device matching OS
+        if let os = os {
+            for group in groups {
+                if group.runtime.contains(os) || group.runtime.contains(os.replacingOccurrences(of: ".", with: "-")) {
+                    if let device = group.devices.first {
+                        return (device, group.runtime)
+                    }
+                }
+            }
+        }
+
+        // Fall back to first available device
+        if let group = groups.first, let device = group.devices.first {
+            return (device, group.runtime)
+        }
+
+        return nil
+    }
+
+    /// Suggest device names similar to the given query using fuzzy matching.
+    ///
+    /// - Parameters:
+    ///   - query: The device name query that failed to match
+    ///   - os: Optional OS version to filter devices by
+    /// - Returns: Array of suggested device names (up to 3)
+    static func suggestDevices(for query: String, os: String? = nil) throws -> [String] {
+        let groups = try listDevices()
+
+        // Filter by OS if provided
+        let filteredGroups = groups.filter { group in
+            guard let os = os else { return true }
+            return group.runtime.contains(os) || group.runtime.contains(os.replacingOccurrences(of: ".", with: "-"))
+        }
+
+        // Extract all device names
+        let allDeviceNames = filteredGroups.flatMap { $0.devices.map { $0.name } }
+
+        // Use FuzzyMatcher to find closest matches
+        return FuzzyMatcher.findClosestMatches(target: query, candidates: allDeviceNames, maxResults: 3)
+    }
+
     // MARK: - Simulator Control
 
     /// Boot a simulator if it's not already booted.
@@ -108,6 +193,7 @@ enum SimulatorManager {
     }
 
     /// Get the path to the built app in DerivedData.
+    /// Returns the most recently modified app bundle matching the scheme name.
     static func findAppBundle(scheme: String, configuration: String = "Debug") -> String? {
         let derivedData = ("~/Library/Developer/Xcode/DerivedData" as NSString)
             .expandingTildeInPath
@@ -118,14 +204,23 @@ enum SimulatorManager {
         // Find directories matching the scheme name
         let candidates = contents.filter { $0.hasPrefix(scheme) || $0.contains(scheme) }
 
+        var foundApps: [(path: String, modificationDate: Date)] = []
+
         for candidate in candidates {
             let buildDir = "\(derivedData)/\(candidate)/Build/Products/\(configuration)-iphonesimulator"
             guard let products = try? fm.contentsOfDirectory(atPath: buildDir) else { continue }
             if let app = products.first(where: { $0.hasSuffix(".app") }) {
-                return "\(buildDir)/\(app)"
+                let appPath = "\(buildDir)/\(app)"
+                // Get modification date of the app bundle
+                if let attrs = try? fm.attributesOfItem(atPath: appPath),
+                   let modDate = attrs[.modificationDate] as? Date {
+                    foundApps.append((path: appPath, modificationDate: modDate))
+                }
             }
         }
-        return nil
+
+        // Return the most recently modified app
+        return foundApps.sorted { $0.modificationDate > $1.modificationDate }.first?.path
     }
 
     /// Extract bundle identifier from an app's Info.plist.
