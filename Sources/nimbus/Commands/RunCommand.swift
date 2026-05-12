@@ -9,6 +9,7 @@ struct RunCommand: ParsableCommand {
 
     @OptionGroup var options: SharedOptions
     @Flag(name: .long, help: "Interactively select a simulator") var interactive = false
+    @Flag(name: .long, help: "Stream console output (stdout/stderr) after launching") var logs = false
 
     mutating func run() throws {
         let config = try options.resolvedConfig()
@@ -54,6 +55,9 @@ struct RunCommand: ParsableCommand {
             } else if requestedDevice == nil {
                 // No device specified, show which one we picked
                 Console.info("Using device: \(found.device.name)")
+            } else {
+                // Exact match found
+                Console.info("Found: \(found.device.name)")
             }
 
             match = found
@@ -77,6 +81,7 @@ struct RunCommand: ParsableCommand {
         Console.step("Booting simulator...")
         try SimulatorManager.boot(udid: match.device.udid)
         try SimulatorManager.openSimulatorApp()
+        Console.info("Simulator ready")
 
         // Step 4: Find app bundle
         guard let scheme = config.scheme else {
@@ -85,6 +90,7 @@ struct RunCommand: ParsableCommand {
         }
 
         let configuration = config.configuration ?? "Debug"
+        Console.step("Locating app bundle...")
         guard let appPath = SimulatorManager.findAppBundle(scheme: scheme, configuration: configuration) else {
             Console.error("Built app not found in DerivedData. Try a clean build.")
             throw ExitCode.failure
@@ -102,9 +108,42 @@ struct RunCommand: ParsableCommand {
             throw ExitCode.failure
         }
 
-        Console.step("Launching \(bundleID)...")
-        try SimulatorManager.launch(udid: match.device.udid, bundleID: bundleID)
+        // Step 7: Launch with console capture if logs requested
+        if logs {
+            Console.step("Launching \(bundleID) with console output...")
+            Console.info("Press Ctrl+C to stop")
+            print()
 
-        Console.success("Running on \(match.device.name)")
+            // Terminate existing instance first
+            _ = try? ProcessRunner.run(
+                "/usr/bin/xcrun",
+                arguments: ["simctl", "terminate", match.device.udid, bundleID]
+            )
+
+            // Launch with console output
+            let exitCode = try ProcessRunner.stream(
+                "/usr/bin/xcrun",
+                arguments: [
+                    "simctl", "launch",
+                    "--console-pty",
+                    match.device.udid,
+                    bundleID
+                ],
+                onStdout: { line in
+                    print(line)
+                },
+                onStderr: { line in
+                    print(line)
+                }
+            )
+
+            if exitCode != 0 && exitCode != 2 { // exit code 2 = user interrupted
+                throw ExitCode(exitCode)
+            }
+        } else {
+            Console.step("Launching \(bundleID)...")
+            try SimulatorManager.launch(udid: match.device.udid, bundleID: bundleID)
+            Console.success("Running on \(match.device.name)")
+        }
     }
 }
