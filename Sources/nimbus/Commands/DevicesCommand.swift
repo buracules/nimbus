@@ -11,7 +11,7 @@ struct DevicesCommand: ParsableCommand {
     var all = false
 
     mutating func run() throws {
-        let groups = try SimulatorManager.listDevices()
+        let groups = try SimulatorManager.listDevices(includeUnavailable: all)
 
         if groups.isEmpty {
             Console.warning("No simulators found. Open Xcode to install simulator runtimes.")
@@ -19,34 +19,28 @@ struct DevicesCommand: ParsableCommand {
         }
 
         for group in groups {
-            let runtimeName = formatRuntime(group.runtime)
+            let runtimeName = SimulatorManager.runtimeDisplayName(group.runtime)
             print(Console.colored("\n\(runtimeName)", .bold))
 
             for device in group.devices {
-                let status: String
-                if device.isBooted {
-                    status = Console.colored("(Booted)", .green)
-                } else {
-                    status = Console.colored("(Shutdown)", .dim)
-                }
-                print("  \(device.name) \(status)")
+                print("  \(device.name) \(statusBadge(for: device))")
             }
         }
         print()
     }
 
-    /// Convert runtime identifier like "com.apple.CoreSimulator.SimRuntime.iOS-18-0"
-    /// to a human-readable name like "iOS 18.0".
-    private func formatRuntime(_ identifier: String) -> String {
-        // The identifier often looks like:
-        // com.apple.CoreSimulator.SimRuntime.iOS-18-0
-        let parts = identifier.split(separator: ".")
-        guard let last = parts.last else { return identifier }
-        return String(last).replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "iOS ", with: "iOS ")
-            // Fix version: "iOS 18 0" -> "iOS 18.0"
-            .replacing(#/(\d+) (\d+)$/#) { match in
-                "\(match.1).\(match.2)"
+    private func statusBadge(for device: SimulatorManager.Device) -> String {
+        if !device.isAvailable {
+            var badge = Console.colored("(Unavailable)", .dim)
+            if let reason = device.availabilityError?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !reason.isEmpty {
+                badge += " " + Console.colored(reason, .dim)
             }
+            return badge
+        }
+        if device.isBooted {
+            return Console.colored("(Booted)", .green)
+        }
+        return Console.colored("(Shutdown)", .dim)
     }
 }

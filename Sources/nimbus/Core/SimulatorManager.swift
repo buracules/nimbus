@@ -25,8 +25,11 @@ enum SimulatorManager {
 
     // MARK: - Device Listing
 
-    /// List all available simulator devices, grouped by runtime.
-    static func listDevices() throws -> [(runtime: String, devices: [Device])] {
+    /// List simulator devices, grouped by runtime.
+    ///
+    /// - Parameter includeUnavailable: when true, devices simctl reports as
+    ///   unavailable (missing runtime, unsupported pairing) are kept.
+    static func listDevices(includeUnavailable: Bool = false) throws -> [(runtime: String, devices: [Device])] {
         let result = try ProcessRunner.run(
             "/usr/bin/xcrun",
             arguments: ["simctl", "list", "devices", "--json"]
@@ -44,7 +47,10 @@ enum SimulatorManager {
 
         return deviceList.devices
             .sorted { $0.key < $1.key }
-            .map { (runtime: $0.key, devices: $0.value.filter { $0.isAvailable }) }
+            .map { entry in
+                let devices = includeUnavailable ? entry.value : entry.value.filter { $0.isAvailable }
+                return (runtime: entry.key, devices: devices)
+            }
             .filter { !$0.devices.isEmpty }
     }
 
@@ -262,7 +268,7 @@ enum SimulatorManager {
         guard let contents = try? fm.contentsOfDirectory(atPath: derivedData) else { return nil }
 
         // Find directories matching the scheme name
-        let candidates = contents.filter { $0.hasPrefix(scheme) || $0.contains(scheme) }
+        let candidates = contents.filter { $0.contains(scheme) }
 
         var foundApps: [(path: String, modificationDate: Date)] = []
 
