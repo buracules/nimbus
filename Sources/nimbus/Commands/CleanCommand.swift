@@ -14,10 +14,10 @@ struct CleanCommand: ParsableCommand {
 
         Console.step("Cleaning \(config.scheme ?? "project")...")
 
-        let runner = XcodeBuildRunner(config: config, verbose: options.verbose)
-        let success = try runner.execute(action: .clean)
+        let runner = XcodeBuildRunner(config: config)
+        let result = try BuildExecutor.execute(action: .clean, runner: runner, verbose: options.verbose)
 
-        if success {
+        if result.succeeded {
             Console.success("Clean complete")
         } else {
             throw ExitCode.failure

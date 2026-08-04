@@ -16,20 +16,18 @@ struct BuildCommand: ParsableCommand {
         // Resolve a concrete simulator like run/test do. Without this the
         // destination is `name=<configured device>` verbatim, which fails
         // whenever the configured name does not exist on this machine.
-        guard let match = try DeviceResolver.resolve(config: config, interactive: interactive, verbose: options.verbose) else {
-            throw ExitCode.failure
-        }
+        let choice = try DeviceSelection.choose(
+            config: config,
+            interactive: interactive,
+            verbose: options.verbose
+        )
 
         Console.step("Building \(config.scheme ?? "project")...")
 
-        let runner = XcodeBuildRunner(
-            config: config,
-            verbose: options.verbose,
-            destinationUDID: match.device.udid
-        )
-        let success = try runner.execute(action: .build)
+        let runner = XcodeBuildRunner(config: config, destinationUDID: choice.device.udid)
+        let result = try BuildExecutor.execute(action: .build, runner: runner, verbose: options.verbose)
 
-        if !success {
+        if !result.succeeded {
             throw ExitCode.failure
         }
     }

@@ -15,20 +15,18 @@ struct TestCommand: ParsableCommand {
 
         // Resolve a concrete simulator: without one, xcodebuild test runs with
         // no -destination and either fails or picks an arbitrary device.
-        guard let match = try DeviceResolver.resolve(config: config, interactive: interactive, verbose: options.verbose) else {
-            throw ExitCode.failure
-        }
+        let choice = try DeviceSelection.choose(
+            config: config,
+            interactive: interactive,
+            verbose: options.verbose
+        )
 
         Console.step("Testing \(config.scheme ?? "project")...")
 
-        let runner = XcodeBuildRunner(
-            config: config,
-            verbose: options.verbose,
-            destinationUDID: match.device.udid
-        )
-        let success = try runner.execute(action: .test)
+        let runner = XcodeBuildRunner(config: config, destinationUDID: choice.device.udid)
+        let result = try BuildExecutor.execute(action: .test, runner: runner, verbose: options.verbose)
 
-        if !success {
+        if !result.succeeded {
             throw ExitCode.failure
         }
     }

@@ -15,25 +15,24 @@ struct RunCommand: ParsableCommand {
         let config = try options.resolvedConfig()
 
         // Step 1: Find simulator (interactive or fallback)
-        guard let match = try DeviceResolver.resolve(config: config, interactive: interactive, verbose: options.verbose) else {
-            throw ExitCode.failure
-        }
+        let choice = try DeviceSelection.choose(
+            config: config,
+            interactive: interactive,
+            verbose: options.verbose
+        )
+        let device = choice.device
 
         // Step 2: Build using the simulator UDID for a reliable destination match
         Console.step("Building \(config.scheme ?? "project")...")
-        let runner = XcodeBuildRunner(
-            config: config,
-            verbose: options.verbose,
-            destinationUDID: match.device.udid
-        )
-        let buildSuccess = try runner.execute(action: .build)
-        guard buildSuccess else {
+        let runner = XcodeBuildRunner(config: config, destinationUDID: device.udid)
+        let buildResult = try BuildExecutor.execute(action: .build, runner: runner, verbose: options.verbose)
+        guard buildResult.succeeded else {
             throw ExitCode.failure
         }
 
         // Step 3: Boot simulator
         Console.step("Booting simulator...")
-        try SimulatorManager.boot(udid: match.device.udid)
+        try SimulatorManager.boot(udid: device.udid)
         try SimulatorManager.openSimulatorApp()
         Console.info("Simulator ready")
 
@@ -44,7 +43,7 @@ struct RunCommand: ParsableCommand {
         }
 
         Console.step("Locating app bundle...")
-        guard let appPath = runner.locateAppBundle() else {
+        guard let appPath = BuildExecutor.locateAppBundle(runner: runner, verbose: options.verbose) else {
             Console.error("Built app not found. Try a clean build.")
             throw ExitCode.failure
         }
@@ -52,8 +51,8 @@ struct RunCommand: ParsableCommand {
         Console.verbose("App path: \(appPath)", isVerbose: options.verbose)
 
         // Step 5: Install
-        Console.step("Installing on \(match.device.name)...")
-        try SimulatorManager.install(udid: match.device.udid, appPath: appPath)
+        Console.step("Installing on \(device.name)...")
+        try SimulatorManager.install(udid: device.udid, appPath: appPath)
 
         // Step 6: Launch
         guard let bundleID = SimulatorManager.bundleIdentifier(appPath: appPath) else {
@@ -70,7 +69,7 @@ struct RunCommand: ParsableCommand {
             // Terminate existing instance first
             _ = try? ProcessRunner.run(
                 "/usr/bin/xcrun",
-                arguments: ["simctl", "terminate", match.device.udid, bundleID]
+                arguments: ["simctl", "terminate", device.udid, bundleID]
             )
 
             // Launch with console output
@@ -79,7 +78,7 @@ struct RunCommand: ParsableCommand {
                 arguments: [
                     "simctl", "launch",
                     "--console-pty",
-                    match.device.udid,
+                    device.udid,
                     bundleID
                 ],
                 onStdout: { line in
@@ -95,8 +94,8 @@ struct RunCommand: ParsableCommand {
             }
         } else {
             Console.step("Launching \(bundleID)...")
-            try SimulatorManager.launch(udid: match.device.udid, bundleID: bundleID)
-            Console.success("Running on \(match.device.name)")
+            try SimulatorManager.launch(udid: device.udid, bundleID: bundleID)
+            Console.success("Running on \(device.name)")
         }
     }
 }

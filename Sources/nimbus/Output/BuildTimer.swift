@@ -12,7 +12,11 @@ struct BuildTimer {
     }
 
     var formatted: String {
-        let seconds = elapsed
+        Self.format(elapsed)
+    }
+
+    /// Render a duration the way nimbus reports build times.
+    static func format(_ seconds: TimeInterval) -> String {
         if seconds < 60 {
             return String(format: "%.1fs", seconds)
         }

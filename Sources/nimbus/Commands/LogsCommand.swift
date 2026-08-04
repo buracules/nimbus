@@ -15,9 +15,11 @@ struct LogsCommand: ParsableCommand {
         let config = try options.resolvedConfig()
 
         // Step 1: Find simulator (interactive or fallback)
-        guard let match = try DeviceResolver.resolve(config: config, interactive: interactive, verbose: options.verbose) else {
-            throw ExitCode.failure
-        }
+        let device = try DeviceSelection.choose(
+            config: config,
+            interactive: interactive,
+            verbose: options.verbose
+        ).device
 
         // Step 2: Make sure the simulator really is booted.
         //
@@ -26,11 +28,11 @@ struct LogsCommand: ParsableCommand {
         // idempotent and blocks on `simctl bootstatus`, which is authoritative.
         // The hint is only good enough to decide whether to bring the
         // Simulator UI forward.
-        let looksShutdown = !match.device.isBooted
+        let looksShutdown = !device.isBooted
         if looksShutdown {
             Console.step("Booting simulator...")
         }
-        try SimulatorManager.boot(udid: match.device.udid)
+        try SimulatorManager.boot(udid: device.udid)
         if looksShutdown {
             try SimulatorManager.openSimulatorApp()
         }
@@ -49,12 +51,8 @@ struct LogsCommand: ParsableCommand {
                 throw ExitCode.failure
             }
 
-            let runner = XcodeBuildRunner(
-                config: config,
-                verbose: options.verbose,
-                destinationUDID: match.device.udid
-            )
-            guard let appPath = runner.locateAppBundle() else {
+            let runner = XcodeBuildRunner(config: config, destinationUDID: device.udid)
+            guard let appPath = BuildExecutor.locateAppBundle(runner: runner, verbose: options.verbose) else {
                 Console.error("Built app not found. Build the app first with 'nimbus run' or 'nimbus build'.")
                 throw ExitCode.failure
             }
@@ -73,14 +71,14 @@ struct LogsCommand: ParsableCommand {
         let predicate = Self.buildPredicate(executableName: executableName, bundleID: appBundleID)
         Console.verbose("Predicate: \(predicate)", isVerbose: options.verbose)
 
-        Console.step("Streaming logs for \(appBundleID) on \(match.device.name)...")
+        Console.step("Streaming logs for \(appBundleID) on \(device.name)...")
         Console.info("Press Ctrl+C to stop")
         print()
 
         let exitCode = try ProcessRunner.stream(
             "/usr/bin/xcrun",
             arguments: [
-                "simctl", "spawn", match.device.udid,
+                "simctl", "spawn", device.udid,
                 "log", "stream",
                 "--predicate", predicate,
                 "--style", "compact"

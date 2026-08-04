@@ -1,9 +1,40 @@
 import Foundation
 
-/// Builds xcodebuild argument lists and runs builds with formatted output.
+/// What an xcodebuild action did. The caller decides how to say it.
+struct BuildResult {
+    let succeeded: Bool
+    let exitCode: Int32
+    let duration: TimeInterval
+}
+
+/// Where the built `.app` is, and how that was worked out.
+///
+/// The diagnostic fields exist so a caller can explain the route it took
+/// without this type printing anything.
+struct AppBundleLocation {
+    /// The app bundle to use, or nil when neither route found one on disk.
+    let path: String?
+    /// What `-showBuildSettings` reported; nil when it could not be read.
+    let buildSettingsPath: String?
+    /// Whether the build-settings path actually exists on disk.
+    let buildSettingsPathExists: Bool
+
+    /// True when `path` came from the DerivedData search rather than from
+    /// build settings.
+    var usedDerivedDataSearch: Bool {
+        path != nil && !buildSettingsPathExists
+    }
+}
+
+/// Builds xcodebuild argument lists and runs builds.
+///
+/// This owns the arguments and the outcome. It does not own the terminal: a
+/// caller that wants formatted output takes the lines through `onOutputLine`,
+/// and a caller that wants to pipe xcodebuild into something else takes
+/// `buildArguments(for:destination:)` and spawns it itself. One source of
+/// truth for the arguments, two transports.
 struct XcodeBuildRunner {
     let config: NimbusConfig
-    let verbose: Bool
     var destinationUDID: String? = nil
 
     enum Action: String {
@@ -45,63 +76,44 @@ struct XcodeBuildRunner {
     }
 
     /// Build the xcodebuild arguments for the given action.
-    func buildArguments(for action: Action, destination: String? = nil) throws -> [String] {
+    func buildArguments(for action: Action, destination: String? = nil) -> [String] {
         commonArguments(destination: destination) + [action.rawValue]
     }
 
-    /// The destination this runner builds for: an explicit UDID when one was
-    /// resolved, otherwise a name/OS destination derived from the config.
+    /// The arguments used to ask xcodebuild where it puts its products.
+    var buildSettingsArguments: [String] {
+        commonArguments(destination: resolvedDestination) + ["-showBuildSettings", "-json"]
+    }
+
+    /// The destination this runner builds for: the simulator that was actually
+    /// resolved, or none.
+    ///
+    /// A configured device *name* is deliberately not a destination. Whether
+    /// that name exists on this machine is the question device resolution
+    /// answers, and passing it to xcodebuild unchecked is what made `build`
+    /// and `clean` fail — for a minute at a time — against a config naming a
+    /// simulator that was never installed. Actions that need a simulator get a
+    /// resolved UDID; `clean` does not need one and gets nothing.
     var resolvedDestination: String? {
-        if let udid = destinationUDID {
-            return "platform=iOS Simulator,id=\(udid)"
-        }
-        return simulatorDestination(device: config.device, os: config.os)
+        destinationUDID.map { "platform=iOS Simulator,id=\($0)" }
     }
 
-    /// Build a destination string for a simulator.
-    func simulatorDestination(device: String?, os: String?) -> String? {
-        guard device != nil || os != nil else { return nil }
-        var parts = ["platform=iOS Simulator"]
-        if let device = device {
-            parts.append("name=\(device)")
-        }
-        if let os = os {
-            parts.append("OS=\(os)")
-        }
-        return parts.joined(separator: ",")
-    }
-
-    /// Execute xcodebuild with the given action, streaming formatted output.
-    @discardableResult
-    func execute(action: Action) throws -> Bool {
+    /// Run xcodebuild for the given action, delivering each output line as it
+    /// arrives.
+    func run(action: Action, onOutputLine: @escaping (String) -> Void) throws -> BuildResult {
         guard let xcodebuild = ProjectDetector.findXcodebuild() else {
-            Console.error("xcodebuild not found. Is Xcode installed?")
-            return false
+            throw NimbusError.notFound("xcodebuild")
         }
 
-        let args = try buildArguments(for: action, destination: resolvedDestination)
+        let args = buildArguments(for: action, destination: resolvedDestination)
+        let started = Date()
+        let exitCode = try ProcessRunner.stream(xcodebuild, arguments: args, onStdout: onOutputLine)
 
-        Console.verbose("xcodebuild \(args.joined(separator: " "))", isVerbose: verbose)
-
-        let timer = BuildTimer()
-
-        // Check if xcbeautify is available and desired
-        let useXcbeautify = shouldUseXcbeautify()
-
-        if useXcbeautify, let xcbeautifyPath = ProcessRunner.which("xcbeautify") {
-            return try runWithXcbeautify(
-                xcodebuild: xcodebuild,
-                args: args,
-                xcbeautifyPath: xcbeautifyPath,
-                timer: timer
-            )
-        } else {
-            return try runWithBuiltInFormatter(
-                xcodebuild: xcodebuild,
-                args: args,
-                timer: timer
-            )
-        }
+        return BuildResult(
+            succeeded: exitCode == 0,
+            exitCode: exitCode,
+            duration: Date().timeIntervalSince(started)
+        )
     }
 
     // MARK: - Built Product Discovery
@@ -113,10 +125,8 @@ struct XcodeBuildRunner {
     func builtProductPath() -> String? {
         guard let xcodebuild = ProjectDetector.findXcodebuild() else { return nil }
 
-        let args = commonArguments(destination: resolvedDestination) + ["-showBuildSettings", "-json"]
-        Console.verbose("xcodebuild \(args.joined(separator: " "))", isVerbose: verbose)
-
-        guard let result = try? ProcessRunner.run(xcodebuild, arguments: args), result.succeeded else {
+        guard let result = try? ProcessRunner.run(xcodebuild, arguments: buildSettingsArguments),
+              result.succeeded else {
             return nil
         }
         return Self.parseBuiltProductPath(fromJSON: result.stdout)
@@ -149,97 +159,31 @@ struct XcodeBuildRunner {
     }
 
     /// Locate the built .app: exact build settings first, DerivedData glob as a
-    /// fallback. Returns nil when neither finds an app that exists on disk.
-    func locateAppBundle() -> String? {
-        if let path = builtProductPath() {
-            if FileManager.default.fileExists(atPath: path) {
-                return path
-            }
-            Console.verbose(
-                "Build settings point at \(path), which does not exist — falling back to DerivedData search",
-                isVerbose: verbose
-            )
-        } else {
-            Console.verbose(
-                "Could not read built product path from build settings — falling back to DerivedData search",
-                isVerbose: verbose
+    /// fallback. The returned value records which route produced the answer so
+    /// the caller can explain it.
+    func locateAppBundle() -> AppBundleLocation {
+        let settingsPath = builtProductPath()
+
+        if let settingsPath, FileManager.default.fileExists(atPath: settingsPath) {
+            return AppBundleLocation(
+                path: settingsPath,
+                buildSettingsPath: settingsPath,
+                buildSettingsPathExists: true
             )
         }
 
-        guard let scheme = config.scheme else { return nil }
-        return SimulatorManager.findAppBundle(scheme: scheme, configuration: config.configuration ?? "Debug")
-    }
-
-    private func shouldUseXcbeautify() -> Bool {
-        if let explicit = config.xcbeautify {
-            return explicit
-        }
-        // Auto-detect: use if available
-        return ProcessRunner.which("xcbeautify") != nil
-    }
-
-    private func runWithXcbeautify(
-        xcodebuild: String,
-        args: [String],
-        xcbeautifyPath: String,
-        timer: BuildTimer
-    ) throws -> Bool {
-        let xcodeBuildProcess = Process()
-        xcodeBuildProcess.executableURL = URL(fileURLWithPath: xcodebuild)
-        xcodeBuildProcess.arguments = args
-
-        let xcbeautifyProcess = Process()
-        xcbeautifyProcess.executableURL = URL(fileURLWithPath: xcbeautifyPath)
-
-        let pipe = Pipe()
-        xcodeBuildProcess.standardOutput = pipe
-        xcodeBuildProcess.standardError = pipe
-        xcbeautifyProcess.standardInput = pipe.fileHandleForReading
-
-        xcbeautifyProcess.standardOutput = FileHandle.standardOutput
-        xcbeautifyProcess.standardError = FileHandle.standardError
-
-        try xcodeBuildProcess.run()
-        try xcbeautifyProcess.run()
-
-        // Close the parent's copy of the write end immediately.
-        // Only xcodebuild needs it — once it exits, xcbeautify will see EOF.
-        pipe.fileHandleForWriting.closeFile()
-
-        xcodeBuildProcess.waitUntilExit()
-        xcbeautifyProcess.waitUntilExit()
-
-        let success = xcodeBuildProcess.terminationStatus == 0
-        printTimeSummary(success: success, timer: timer)
-        return success
-    }
-
-    private func runWithBuiltInFormatter(
-        xcodebuild: String,
-        args: [String],
-        timer: BuildTimer
-    ) throws -> Bool {
-        let reporter = ProgressReporter(verbose: verbose)
-
-        let exitCode = try ProcessRunner.stream(
-            xcodebuild,
-            arguments: args
-        ) { line in
-            if let formatted = reporter.format(line: line) {
-                print(formatted)
-            }
+        var fallback: String? = nil
+        if let scheme = config.scheme {
+            fallback = SimulatorManager.findAppBundle(
+                scheme: scheme,
+                configuration: config.configuration ?? "Debug"
+            )
         }
 
-        let success = exitCode == 0
-        printTimeSummary(success: success, timer: timer)
-        return success
-    }
-
-    private func printTimeSummary(success: Bool, timer: BuildTimer) {
-        if success {
-            Console.success("Built in \(timer.formatted)")
-        } else {
-            Console.error("Build failed after \(timer.formatted)")
-        }
+        return AppBundleLocation(
+            path: fallback,
+            buildSettingsPath: settingsPath,
+            buildSettingsPathExists: false
+        )
     }
 }

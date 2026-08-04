@@ -138,26 +138,28 @@ final class XcodeBuildRunnerTests: XCTestCase {
     func testResolvedDestinationPrefersUDID() {
         let runner = XcodeBuildRunner(
             config: makeConfig(device: "iPhone 17", os: "26.2"),
-            verbose: false,
             destinationUDID: "ABC-123"
         )
         XCTAssertEqual(runner.resolvedDestination, "platform=iOS Simulator,id=ABC-123")
     }
 
-    func testResolvedDestinationFallsBackToNameAndOS() {
-        let runner = XcodeBuildRunner(config: makeConfig(device: "iPhone 17", os: "26.2"), verbose: false)
-        XCTAssertEqual(runner.resolvedDestination, "platform=iOS Simulator,name=iPhone 17,OS=26.2")
+    /// A configured name is not a destination — only a resolved device is.
+    /// Passing `name=iPhone 17` through unchecked is what made build and clean
+    /// fail against a simulator this machine never had.
+    func testConfiguredDeviceNameIsNotUsedAsADestination() {
+        let runner = XcodeBuildRunner(config: makeConfig(device: "iPhone 17", os: "26.2"))
+        XCTAssertNil(runner.resolvedDestination)
     }
 
-    func testResolvedDestinationIsNilWithoutDeviceOrOS() {
-        let runner = XcodeBuildRunner(config: makeConfig(), verbose: false)
+    func testResolvedDestinationIsNilWithoutAResolvedDevice() {
+        let runner = XcodeBuildRunner(config: makeConfig())
         XCTAssertNil(runner.resolvedDestination)
     }
 
     func testBuildArgumentsAppendActionToCommonArguments() throws {
-        let runner = XcodeBuildRunner(config: makeConfig(), verbose: false, destinationUDID: "ABC-123")
+        let runner = XcodeBuildRunner(config: makeConfig(), destinationUDID: "ABC-123")
         let common = runner.commonArguments(destination: runner.resolvedDestination)
-        let args = try runner.buildArguments(for: .build, destination: runner.resolvedDestination)
+        let args = runner.buildArguments(for: .build, destination: runner.resolvedDestination)
 
         XCTAssertEqual(args, common + ["build"])
         XCTAssertEqual(

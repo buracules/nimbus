@@ -1,76 +1,59 @@
-import ArgumentParser
 import Foundation
 
-/// Resolves which simulator a command should target, via interactive picker
-/// or smart fallback matching. Shared by run/logs/test.
+/// The outcome of matching a configured device against the simulators that
+/// exist on this machine.
+///
+/// Every line a caller might want to print is derivable from these fields.
+/// Choosing a device and telling a human about it are two different jobs, and
+/// only the first one belongs here.
+struct DeviceResolution {
+    let device: SimulatorManager.Device
+    let runtime: String
+    /// The device name that was asked for, if one was configured.
+    let requestedName: String?
+    /// False when the requested name did not match and something else was used.
+    /// True when nothing was requested — there was no request to miss.
+    let matchedRequest: Bool
+    /// Names close to the request, populated only when the request fell back.
+    let suggestions: [String]
+}
+
+/// Decides which simulator a command targets. Matching policy lives here;
+/// asking a human lives with whoever has a human.
 enum DeviceResolver {
-    /// Resolve a device either interactively or via smart fallback, printing
-    /// the same status/warning/suggestion messages the commands have always shown.
+    /// Match the configured device against the simulators that exist.
     ///
-    /// - Returns: The selected device and its runtime, or nil if the user
-    ///   cancelled an interactive selection or no simulators are available
-    ///   (in both cases an error/info message has already been printed).
-    static func resolve(
-        config: NimbusConfig,
-        interactive: Bool,
-        verbose: Bool
-    ) throws -> (device: SimulatorManager.Device, runtime: String)? {
-        guard let match = try select(config: config, interactive: interactive) else {
-            return nil
-        }
-        Console.verbose("Selected: \(match.device.name) (\(match.device.udid))", isVerbose: verbose)
-        return match
-    }
-
-    private static func select(
-        config: NimbusConfig,
-        interactive: Bool
-    ) throws -> (device: SimulatorManager.Device, runtime: String)? {
-        if interactive {
-            Console.step("Loading available simulators...")
-            let groups = try SimulatorManager.listDevices()
-
-            guard let selected = try DevicePicker.selectDevice(groups: groups, os: config.os) else {
-                Console.info("No device selected")
-                return nil
-            }
-            return selected
-        }
-
-        let requestedDevice = config.device
-        let os = config.os
-
-        if let requestedDevice = requestedDevice {
-            Console.step("Finding simulator \"\(requestedDevice)\"...")
-        } else {
-            Console.step("Finding available simulator...")
-        }
-
+    /// - Returns: the resolution, or nil when there are no simulators at all.
+    static func resolveDevice(config: NimbusConfig) throws -> DeviceResolution? {
         // One enumeration serves the match, the fallback and the suggestions.
         let catalog = try SimulatorManager.availableDevices()
 
         guard let found = SimulatorManager.findDeviceWithFallback(
             in: catalog.groups,
-            name: requestedDevice,
-            os: os
+            name: config.device,
+            os: config.os
         ) else {
-            Console.error("No simulators available. Run 'nimbus devices' to see available simulators.")
             return nil
         }
 
-        if let requestedDevice = requestedDevice, found.device.name != requestedDevice {
-            Console.warning("Device '\(requestedDevice)' not found, using '\(found.device.name)' instead")
+        let requestedName = config.device
+        let matchedRequest = requestedName.map { $0 == found.device.name } ?? true
 
-            let suggestions = SimulatorManager.suggestDevices(in: catalog.groups, for: requestedDevice, os: os)
-            if !suggestions.isEmpty {
-                print("  Did you mean: \(suggestions.map { "\"\($0)\"" }.joined(separator: ", "))?")
-            }
-        } else if requestedDevice == nil {
-            Console.info("Using device: \(found.device.name)")
-        } else {
-            Console.info("Found: \(found.device.name)")
+        var suggestions: [String] = []
+        if let requestedName, !matchedRequest {
+            suggestions = SimulatorManager.suggestDevices(
+                in: catalog.groups,
+                for: requestedName,
+                os: config.os
+            )
         }
 
-        return found
+        return DeviceResolution(
+            device: found.device,
+            runtime: found.runtime,
+            requestedName: requestedName,
+            matchedRequest: matchedRequest,
+            suggestions: suggestions
+        )
     }
 }
