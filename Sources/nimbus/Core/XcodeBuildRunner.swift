@@ -12,8 +12,9 @@ struct XcodeBuildRunner {
         case clean
     }
 
-    /// Build the xcodebuild arguments for the given action.
-    func buildArguments(for action: Action, destination: String? = nil) throws -> [String] {
+    /// The project/scheme/configuration/destination arguments every xcodebuild
+    /// invocation for this config shares.
+    func commonArguments(destination: String? = nil) -> [String] {
         var args: [String] = []
 
         // Project or workspace
@@ -40,10 +41,21 @@ struct XcodeBuildRunner {
             args += ["-destination", dest]
         }
 
-        // Action
-        args.append(action.rawValue)
-
         return args
+    }
+
+    /// Build the xcodebuild arguments for the given action.
+    func buildArguments(for action: Action, destination: String? = nil) throws -> [String] {
+        commonArguments(destination: destination) + [action.rawValue]
+    }
+
+    /// The destination this runner builds for: an explicit UDID when one was
+    /// resolved, otherwise a name/OS destination derived from the config.
+    var resolvedDestination: String? {
+        if let udid = destinationUDID {
+            return "platform=iOS Simulator,id=\(udid)"
+        }
+        return simulatorDestination(device: config.device, os: config.os)
     }
 
     /// Build a destination string for a simulator.
@@ -67,13 +79,7 @@ struct XcodeBuildRunner {
             return false
         }
 
-        let destination: String?
-        if let udid = destinationUDID {
-            destination = "platform=iOS Simulator,id=\(udid)"
-        } else {
-            destination = simulatorDestination(device: config.device, os: config.os)
-        }
-        let args = try buildArguments(for: action, destination: destination)
+        let args = try buildArguments(for: action, destination: resolvedDestination)
 
         Console.verbose("xcodebuild \(args.joined(separator: " "))", isVerbose: verbose)
 
@@ -96,6 +102,72 @@ struct XcodeBuildRunner {
                 timer: timer
             )
         }
+    }
+
+    // MARK: - Built Product Discovery
+
+    /// Ask xcodebuild where it puts the built .app for this configuration.
+    ///
+    /// Costs roughly 1-3 s, so only `run`/`logs` should call it — never plain
+    /// `build`. Returns nil when xcodebuild is missing or reports no app target.
+    func builtProductPath() -> String? {
+        guard let xcodebuild = ProjectDetector.findXcodebuild() else { return nil }
+
+        let args = commonArguments(destination: resolvedDestination) + ["-showBuildSettings", "-json"]
+        Console.verbose("xcodebuild \(args.joined(separator: " "))", isVerbose: verbose)
+
+        guard let result = try? ProcessRunner.run(xcodebuild, arguments: args), result.succeeded else {
+            return nil
+        }
+        return Self.parseBuiltProductPath(fromJSON: result.stdout)
+    }
+
+    /// Extract the built .app path from `xcodebuild -showBuildSettings -json`.
+    /// The payload is an array of `{"target": ..., "buildSettings": {...}}`.
+    static func parseBuiltProductPath(fromJSON json: String) -> String? {
+        // xcodebuild sometimes prefixes the payload with notes/warnings.
+        guard let arrayStart = json.firstIndex(of: "["),
+              let data = String(json[arrayStart...]).data(using: .utf8),
+              let targets = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return nil
+        }
+
+        for target in targets {
+            guard let settings = target["buildSettings"] as? [String: Any],
+                  let wrapperName = settings["WRAPPER_NAME"] as? String,
+                  wrapperName.hasSuffix(".app") else {
+                continue
+            }
+            if let buildDir = settings["TARGET_BUILD_DIR"] as? String, !buildDir.isEmpty {
+                return "\(buildDir)/\(wrapperName)"
+            }
+            if let folder = settings["CODESIGNING_FOLDER_PATH"] as? String, !folder.isEmpty {
+                return folder
+            }
+        }
+        return nil
+    }
+
+    /// Locate the built .app: exact build settings first, DerivedData glob as a
+    /// fallback. Returns nil when neither finds an app that exists on disk.
+    func locateAppBundle() -> String? {
+        if let path = builtProductPath() {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+            Console.verbose(
+                "Build settings point at \(path), which does not exist — falling back to DerivedData search",
+                isVerbose: verbose
+            )
+        } else {
+            Console.verbose(
+                "Could not read built product path from build settings — falling back to DerivedData search",
+                isVerbose: verbose
+            )
+        }
+
+        guard let scheme = config.scheme else { return nil }
+        return SimulatorManager.findAppBundle(scheme: scheme, configuration: config.configuration ?? "Debug")
     }
 
     private func shouldUseXcbeautify() -> Bool {

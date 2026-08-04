@@ -38,15 +38,14 @@ struct RunCommand: ParsableCommand {
         Console.info("Simulator ready")
 
         // Step 4: Find app bundle
-        guard let scheme = config.scheme else {
+        guard config.scheme != nil else {
             Console.error("Cannot determine scheme. Specify --scheme or add it to nimbus.yml.")
             throw ExitCode.failure
         }
 
-        let configuration = config.configuration ?? "Debug"
         Console.step("Locating app bundle...")
-        guard let appPath = SimulatorManager.findAppBundle(scheme: scheme, configuration: configuration) else {
-            Console.error("Built app not found in DerivedData. Try a clean build.")
+        guard let appPath = runner.locateAppBundle() else {
+            Console.error("Built app not found. Try a clean build.")
             throw ExitCode.failure
         }
 

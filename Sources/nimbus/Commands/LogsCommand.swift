@@ -34,14 +34,18 @@ struct LogsCommand: ParsableCommand {
             appBundleID = providedBundleID
         } else {
             // Auto-detect from scheme
-            guard let scheme = config.scheme else {
+            guard config.scheme != nil else {
                 Console.error("Cannot determine bundle ID. Specify --bundle-id or --scheme.")
                 throw ExitCode.failure
             }
 
-            let configuration = config.configuration ?? "Debug"
-            guard let appPath = SimulatorManager.findAppBundle(scheme: scheme, configuration: configuration) else {
-                Console.error("Built app not found in DerivedData. Build the app first with 'nimbus run' or 'nimbus build'.")
+            let runner = XcodeBuildRunner(
+                config: config,
+                verbose: options.verbose,
+                destinationUDID: match.device.udid
+            )
+            guard let appPath = runner.locateAppBundle() else {
+                Console.error("Built app not found. Build the app first with 'nimbus run' or 'nimbus build'.")
                 throw ExitCode.failure
             }
 
