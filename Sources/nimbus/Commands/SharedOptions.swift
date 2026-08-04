@@ -50,33 +50,76 @@ struct SharedOptions: ParsableArguments {
                 projectValue: projectFile?.value
             )
 
-            // Prefer scheme that matches the project/workspace name
-            var selectedScheme: String?
-            if let projectName = projectFile?.value {
-                let baseName = (projectName as NSString).deletingPathExtension
-                // First try exact match
-                if let match = schemes.first(where: { $0 == baseName }) {
-                    selectedScheme = match
-                }
-                // Then try prefix match (e.g., "MyApp" matches "MyApp-Debug")
-                else if let match = schemes.first(where: { $0.hasPrefix(baseName) }) {
-                    selectedScheme = match
-                }
-            }
-            // Fall back to first non-dependency scheme (skip common SPM dependency names)
-            if selectedScheme == nil {
-                let dependencyPrefixes = ["Facebook", "FBSDK", "Firebase", "Google", "Adjust"]
-                selectedScheme = schemes.first { scheme in
-                    !dependencyPrefixes.contains { scheme.hasPrefix($0) }
-                } ?? schemes.first
+            if !schemes.isEmpty {
+                Console.verbose("Candidate schemes: \(schemes.joined(separator: ", "))", isVerbose: verbose)
             }
 
-            if let selected = selectedScheme {
-                merged.scheme = selected
-                Console.verbose("Auto-detected scheme: \(selected)", isVerbose: verbose)
+            if let selection = Self.selectSchemeWithReason(from: schemes, projectName: projectFile?.value) {
+                merged.scheme = selection.scheme
+                Console.verbose(
+                    "Auto-detected scheme: \(selection.scheme) — \(selection.reason)",
+                    isVerbose: verbose
+                )
             }
         }
 
         return merged
+    }
+
+    // MARK: - Scheme Auto-detection
+
+    /// Scheme name prefixes that almost always belong to a vendored dependency
+    /// rather than the app being built.
+    static let dependencySchemePrefixes = ["Facebook", "FBSDK", "Firebase", "Google", "Adjust"]
+
+    struct SchemeSelection {
+        let scheme: String
+        let reason: String
+    }
+
+    /// Pick the scheme most likely to be the app, given the project file name.
+    ///
+    /// Order: exact project-name match, then project-name prefix match, then
+    /// the first scheme that is neither a known dependency nor a test bundle.
+    /// Test schemes are only ever chosen when nothing else is left.
+    static func selectScheme(from schemes: [String], projectName: String?) -> String? {
+        selectSchemeWithReason(from: schemes, projectName: projectName)?.scheme
+    }
+
+    static func selectSchemeWithReason(from schemes: [String], projectName: String?) -> SchemeSelection? {
+        guard let first = schemes.first else { return nil }
+
+        if let projectName {
+            let baseName = (projectName as NSString).deletingPathExtension
+            if let match = schemes.first(where: { $0 == baseName }) {
+                return SchemeSelection(scheme: match, reason: "exactly matches project name '\(baseName)'")
+            }
+            // Prefer a non-test prefix match ("MyApp-Debug" over "MyAppTests").
+            if let match = schemes.first(where: { $0.hasPrefix(baseName) && !isTestScheme($0) }) {
+                return SchemeSelection(scheme: match, reason: "prefix-matches project name '\(baseName)'")
+            }
+            if let match = schemes.first(where: { $0.hasPrefix(baseName) }) {
+                return SchemeSelection(
+                    scheme: match,
+                    reason: "prefix-matches project name '\(baseName)' (only test schemes matched)"
+                )
+            }
+        }
+
+        if let match = schemes.first(where: { !isDependencyScheme($0) && !isTestScheme($0) }) {
+            return SchemeSelection(scheme: match, reason: "first scheme that is neither a dependency nor a test bundle")
+        }
+        if let match = schemes.first(where: { !isDependencyScheme($0) }) {
+            return SchemeSelection(scheme: match, reason: "first non-dependency scheme (all were test bundles)")
+        }
+        return SchemeSelection(scheme: first, reason: "only candidate available")
+    }
+
+    static func isTestScheme(_ scheme: String) -> Bool {
+        scheme.hasSuffix("Tests") || scheme.hasSuffix("UITests")
+    }
+
+    static func isDependencyScheme(_ scheme: String) -> Bool {
+        dependencySchemePrefixes.contains { scheme.hasPrefix($0) }
     }
 }
