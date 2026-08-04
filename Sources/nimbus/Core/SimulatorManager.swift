@@ -48,15 +48,79 @@ enum SimulatorManager {
             .filter { !$0.devices.isEmpty }
     }
 
+    // MARK: - Runtime Identifiers
+
+    /// Extract the version from a runtime identifier.
+    /// `com.apple.CoreSimulator.SimRuntime.iOS-26-2` -> `"26.2"`.
+    /// Returns nil when the identifier carries no numeric version.
+    static func runtimeVersion(from identifier: String) -> String? {
+        guard let lastComponent = identifier.split(separator: ".").last else { return nil }
+        var parts = lastComponent.split(separator: "-").map(String.init)
+        // Drop the leading platform word ("iOS", "watchOS", ...) if present.
+        if let first = parts.first, !isNumeric(first) {
+            parts.removeFirst()
+        }
+        let numeric = parts.prefix { isNumeric($0) }
+        guard !numeric.isEmpty else { return nil }
+        return numeric.joined(separator: ".")
+    }
+
+    /// Extract the platform word from a runtime identifier.
+    /// `com.apple.CoreSimulator.SimRuntime.iOS-26-2` -> `"iOS"`.
+    static func runtimePlatform(from identifier: String) -> String? {
+        guard let lastComponent = identifier.split(separator: ".").last,
+              let first = lastComponent.split(separator: "-").first,
+              !isNumeric(String(first)) else { return nil }
+        return String(first)
+    }
+
+    /// Human-readable runtime name: `...SimRuntime.iOS-26-2` -> `"iOS 26.2"`.
+    static func runtimeDisplayName(_ identifier: String) -> String {
+        guard let version = runtimeVersion(from: identifier) else {
+            guard let last = identifier.split(separator: ".").last else { return identifier }
+            return last.replacingOccurrences(of: "-", with: " ")
+        }
+        guard let platform = runtimePlatform(from: identifier) else { return version }
+        return "\(platform) \(version)"
+    }
+
+    /// Whether a requested OS version identifies the given runtime.
+    ///
+    /// Comparison is by version *component*, not substring: the requested
+    /// components must be a prefix of the runtime's, so `26` matches 26.2 and
+    /// `26.2` matches 26.2, but `6.2` does not match 26.2.
+    static func runtimeMatches(_ identifier: String, os: String) -> Bool {
+        guard let version = runtimeVersion(from: identifier) else { return false }
+        let requested = os
+            .trimmingCharacters(in: .whitespaces)
+            .split(separator: ".")
+            .map(String.init)
+        guard !requested.isEmpty else { return false }
+
+        let actual = version.split(separator: ".").map(String.init)
+        guard requested.count <= actual.count else { return false }
+
+        for (requestedPart, actualPart) in zip(requested, actual) {
+            guard let requestedValue = Int(requestedPart),
+                  let actualValue = Int(actualPart),
+                  requestedValue == actualValue else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func isNumeric(_ string: String) -> Bool {
+        !string.isEmpty && string.allSatisfy { $0.isNumber }
+    }
+
     // MARK: - Device Lookup
 
     /// Find a simulator matching the given name and optional OS version.
     static func findDevice(name: String, os: String? = nil) throws -> (device: Device, runtime: String)? {
         let groups = try listDevices()
         for group in groups {
-            if let os = os,
-               !group.runtime.contains(os),
-               !group.runtime.contains(os.replacingOccurrences(of: ".", with: "-")) {
+            if let os = os, !runtimeMatches(group.runtime, os: os) {
                 continue
             }
             if let device = group.devices.first(where: { $0.name == name }) {
@@ -94,11 +158,9 @@ enum SimulatorManager {
 
         // Try booted device matching OS
         if let os = os {
-            for group in groups {
-                if group.runtime.contains(os) || group.runtime.contains(os.replacingOccurrences(of: ".", with: "-")) {
-                    if let device = group.devices.first(where: { $0.isBooted }) {
-                        return (device, group.runtime)
-                    }
+            for group in groups where runtimeMatches(group.runtime, os: os) {
+                if let device = group.devices.first(where: { $0.isBooted }) {
+                    return (device, group.runtime)
                 }
             }
         }
@@ -112,11 +174,9 @@ enum SimulatorManager {
 
         // Try first available device matching OS
         if let os = os {
-            for group in groups {
-                if group.runtime.contains(os) || group.runtime.contains(os.replacingOccurrences(of: ".", with: "-")) {
-                    if let device = group.devices.first {
-                        return (device, group.runtime)
-                    }
+            for group in groups where runtimeMatches(group.runtime, os: os) {
+                if let device = group.devices.first {
+                    return (device, group.runtime)
                 }
             }
         }
@@ -141,7 +201,7 @@ enum SimulatorManager {
         // Filter by OS if provided
         let filteredGroups = groups.filter { group in
             guard let os = os else { return true }
-            return group.runtime.contains(os) || group.runtime.contains(os.replacingOccurrences(of: ".", with: "-"))
+            return runtimeMatches(group.runtime, os: os)
         }
 
         // Extract all device names
