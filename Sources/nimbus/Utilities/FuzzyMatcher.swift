@@ -21,6 +21,11 @@ enum FuzzyMatcher {
         let m = s1Array.count
         let n = s2Array.count
 
+        // An empty string costs one edit per character of the other. Handled up
+        // front because the dp fill below would form a 1...0 range otherwise.
+        if m == 0 { return n }
+        if n == 0 { return m }
+
         // Create a 2D array for dynamic programming
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
 
@@ -50,23 +55,39 @@ enum FuzzyMatcher {
         return dp[m][n]
     }
 
+    /// The largest edit distance still worth suggesting for a given query.
+    ///
+    /// Scales with the query so long names tolerate more typos, with a floor of
+    /// 2 so short names still tolerate a slip.
+    static func defaultThreshold(for target: String) -> Int {
+        max(2, target.count / 3)
+    }
+
     /// Finds the closest matching strings from a list of candidates
+    ///
+    /// Candidates further than `threshold` edits away are dropped, so a query
+    /// that resembles nothing in the list yields no suggestions rather than
+    /// three arbitrary ones.
     ///
     /// - Parameters:
     ///   - target: The target string to match against
     ///   - candidates: Array of candidate strings to search through
     ///   - maxResults: Maximum number of results to return (default: 3)
+    ///   - threshold: Maximum edit distance to accept (default: `defaultThreshold(for:)`)
     /// - Returns: Array of closest matching strings, sorted by similarity (best match first)
-    static func findClosestMatches(target: String, candidates: [String], maxResults: Int = 3) -> [String] {
-        // Calculate distance for each candidate
-        let candidatesWithDistance = candidates.map { candidate in
-            (candidate: candidate, distance: levenshteinDistance(target, candidate))
-        }
+    static func findClosestMatches(
+        target: String,
+        candidates: [String],
+        maxResults: Int = 3,
+        threshold: Int? = nil
+    ) -> [String] {
+        let limit = threshold ?? defaultThreshold(for: target)
 
-        // Sort by distance (ascending) - lower distance means better match
-        let sorted = candidatesWithDistance.sorted { $0.distance < $1.distance }
-
-        // Return top N matches
-        return Array(sorted.prefix(maxResults).map { $0.candidate })
+        return candidates
+            .map { (candidate: $0, distance: levenshteinDistance(target, $0)) }
+            .filter { $0.distance <= limit }
+            .sorted { $0.distance < $1.distance }
+            .prefix(maxResults)
+            .map { $0.candidate }
     }
 }
