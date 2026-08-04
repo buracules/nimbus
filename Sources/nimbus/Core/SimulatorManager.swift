@@ -291,13 +291,26 @@ enum SimulatorManager {
 
     /// Extract bundle identifier from an app's Info.plist.
     static func bundleIdentifier(appPath: String) -> String? {
+        infoPlistString(appPath: appPath, key: "CFBundleIdentifier")
+    }
+
+    /// Extract the executable name from an app's Info.plist.
+    ///
+    /// This is what shows up at the end of the process image path on a
+    /// simulator (`.../MyApp.app/MyApp`), which the bundle identifier never does.
+    static func executableName(appPath: String) -> String? {
+        infoPlistString(appPath: appPath, key: "CFBundleExecutable")
+    }
+
+    private static func infoPlistString(appPath: String, key: String) -> String? {
         let plistPath = "\(appPath)/Info.plist"
         guard let data = FileManager.default.contents(atPath: plistPath),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let bundleID = plist["CFBundleIdentifier"] as? String else {
+              let value = plist[key] as? String,
+              !value.isEmpty else {
             return nil
         }
-        return bundleID
+        return value
     }
 }
 

@@ -28,10 +28,13 @@ struct LogsCommand: ParsableCommand {
             Thread.sleep(forTimeInterval: 2.0)
         }
 
-        // Step 3: Determine bundle ID
+        // Step 3: Determine bundle ID and the process name to match on
         let appBundleID: String
+        let executableName: String?
         if let providedBundleID = bundleID {
             appBundleID = providedBundleID
+            // No app bundle to read CFBundleExecutable from — best effort.
+            executableName = Self.processName(fromBundleID: providedBundleID)
         } else {
             // Auto-detect from scheme
             guard config.scheme != nil else {
@@ -55,9 +58,14 @@ struct LogsCommand: ParsableCommand {
             }
 
             appBundleID = bundleID
+            executableName = SimulatorManager.executableName(appPath: appPath)
+                ?? Self.processName(fromBundleID: bundleID)
         }
 
         // Step 4: Stream logs
+        let predicate = Self.buildPredicate(executableName: executableName, bundleID: appBundleID)
+        Console.verbose("Predicate: \(predicate)", isVerbose: options.verbose)
+
         Console.step("Streaming logs for \(appBundleID) on \(match.device.name)...")
         Console.info("Press Ctrl+C to stop")
         print()
@@ -67,7 +75,7 @@ struct LogsCommand: ParsableCommand {
             arguments: [
                 "simctl", "spawn", match.device.udid,
                 "log", "stream",
-                "--predicate", "processImagePath CONTAINS \"\(appBundleID)\"",
+                "--predicate", predicate,
                 "--style", "compact"
             ],
             onStdout: { line in
@@ -82,5 +90,35 @@ struct LogsCommand: ParsableCommand {
         if exitCode != 0 {
             throw ExitCode(exitCode)
         }
+    }
+
+    // MARK: - Predicate
+
+    /// Build the `log stream` predicate for an app.
+    ///
+    /// Two clauses, OR'd: the process image path catches print/stderr output
+    /// (on a simulator that path ends in `.../MyApp.app/MyApp`, which never
+    /// contains the bundle identifier), and the subsystem catches `os.Logger`
+    /// output.
+    static func buildPredicate(executableName: String?, bundleID: String) -> String {
+        var clauses: [String] = []
+        if let executableName, !executableName.isEmpty {
+            clauses.append("processImagePath ENDSWITH \"/\(escape(executableName))\"")
+        }
+        clauses.append("subsystem == \"\(escape(bundleID))\"")
+        return clauses.joined(separator: " OR ")
+    }
+
+    /// Best-effort process name for a bundle identifier: the last dot-component
+    /// of `com.example.MyApp` is usually the executable name.
+    static func processName(fromBundleID bundleID: String) -> String? {
+        let last = bundleID.split(separator: ".").last.map(String.init) ?? bundleID
+        return last.isEmpty ? nil : last
+    }
+
+    private static func escape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
