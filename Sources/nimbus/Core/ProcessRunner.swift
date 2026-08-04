@@ -1,5 +1,42 @@
 import Foundation
 
+/// Accumulates arbitrary chunks of bytes and emits whole newline-terminated
+/// lines. Not thread-safe on its own — callers must serialize access.
+struct LineBuffer {
+    private static let newline = Data("\n".utf8)
+
+    private var buffer = Data()
+
+    /// Append a chunk and emit every complete line it produced.
+    mutating func append(_ data: Data, emit: (String) -> Void) {
+        guard !data.isEmpty else { return }
+        buffer.append(data)
+        while let newlineRange = buffer.range(of: Self.newline) {
+            let lineData = buffer[buffer.startIndex..<newlineRange.lowerBound]
+            if let line = String(data: lineData, encoding: .utf8) {
+                emit(line)
+            }
+            buffer.removeSubrange(buffer.startIndex..<newlineRange.upperBound)
+        }
+    }
+
+    /// Emit whatever trailing bytes remain as a final, unterminated line.
+    mutating func flush(emit: (String) -> Void) {
+        guard !buffer.isEmpty else { return }
+        if let line = String(data: buffer, encoding: .utf8), !line.isEmpty {
+            emit(line)
+        }
+        buffer.removeAll()
+    }
+}
+
+/// Holds the two line buffers a streaming process writes into.
+/// All access is serialized onto ProcessRunner's stream queue.
+private final class StreamBuffers {
+    var stdout = LineBuffer()
+    var stderr = LineBuffer()
+}
+
 /// Wrapper around Foundation.Process for running shell commands.
 enum ProcessRunner {
     struct Output {
@@ -72,47 +109,44 @@ enum ProcessRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        var stdoutBuffer = Data()
-        var stderrBuffer = Data()
+        // The readability handlers fire on their own queues. Every touch of the
+        // line buffers — and therefore every line callback — is funnelled onto
+        // this one serial queue, so there is exactly one writer at a time.
+        let queue = DispatchQueue(label: "nimbus.process-stream")
+        let buffers = StreamBuffers()
+        let emitStderr = onStderr ?? onStdout
 
         stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            stdoutBuffer.append(data)
-            while let newlineRange = stdoutBuffer.range(of: Data("\n".utf8)) {
-                let lineData = stdoutBuffer[stdoutBuffer.startIndex..<newlineRange.lowerBound]
-                if let line = String(data: lineData, encoding: .utf8) {
-                    onStdout(line)
-                }
-                stdoutBuffer.removeSubrange(stdoutBuffer.startIndex...newlineRange.lowerBound)
-            }
+            queue.async { buffers.stdout.append(data, emit: onStdout) }
         }
 
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            stderrBuffer.append(data)
-            while let newlineRange = stderrBuffer.range(of: Data("\n".utf8)) {
-                let lineData = stderrBuffer[stderrBuffer.startIndex..<newlineRange.lowerBound]
-                if let line = String(data: lineData, encoding: .utf8) {
-                    (onStderr ?? onStdout)(line)
-                }
-                stderrBuffer.removeSubrange(stderrBuffer.startIndex...newlineRange.lowerBound)
-            }
+            queue.async { buffers.stderr.append(data, emit: emitStderr) }
         }
 
         try process.run()
         process.waitUntilExit()
 
-        // Flush remaining buffers
+        // waitUntilExit does not guarantee the handlers drained the pipes, so
+        // detach them and read whatever is left ourselves.
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
 
-        if let remaining = String(data: stdoutBuffer, encoding: .utf8), !remaining.isEmpty {
-            onStdout(remaining)
-        }
-        if let remaining = String(data: stderrBuffer, encoding: .utf8), !remaining.isEmpty {
-            (onStderr ?? onStdout)(remaining)
+        let trailingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let trailingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+        // sync on the serial queue is the barrier: everything the handlers
+        // already enqueued has run before this block, and this block delivers
+        // the tail before stream() returns.
+        queue.sync {
+            buffers.stdout.append(trailingStdout, emit: onStdout)
+            buffers.stdout.flush(emit: onStdout)
+            buffers.stderr.append(trailingStderr, emit: emitStderr)
+            buffers.stderr.flush(emit: emitStderr)
         }
 
         return process.terminationStatus
