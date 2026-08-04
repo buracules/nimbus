@@ -219,7 +219,8 @@ enum SimulatorManager {
 
     // MARK: - Simulator Control
 
-    /// Boot a simulator if it's not already booted.
+    /// Boot a simulator if it's not already booted, and block until it has
+    /// finished booting.
     static func boot(udid: String) throws {
         let result = try ProcessRunner.run(
             "/usr/bin/xcrun",
@@ -228,6 +229,25 @@ enum SimulatorManager {
         // exit code 149 means already booted — that's fine
         if !result.succeeded && result.exitCode != 149 {
             throw NimbusError.commandFailed("simctl boot", result.stderr)
+        }
+        try waitForBoot(udid: udid)
+    }
+
+    /// Block until the simulator has finished booting.
+    ///
+    /// `simctl boot` returns as soon as the boot is under way, so anything that
+    /// follows it (install, launch, log stream) can race the boot. `bootstatus`
+    /// waits for the real terminal state instead of guessing with a sleep.
+    ///
+    /// Note: `boot(udid:)` must run first — `bootstatus -b` on its own will
+    /// boot the device but does not leave it booted after it exits.
+    static func waitForBoot(udid: String) throws {
+        let result = try ProcessRunner.run(
+            "/usr/bin/xcrun",
+            arguments: ["simctl", "bootstatus", udid, "-b"]
+        )
+        guard result.succeeded else {
+            throw NimbusError.commandFailed("simctl bootstatus", result.stderr)
         }
     }
 

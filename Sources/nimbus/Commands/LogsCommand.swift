@@ -24,8 +24,6 @@ struct LogsCommand: ParsableCommand {
             Console.step("Booting simulator...")
             try SimulatorManager.boot(udid: match.device.udid)
             try SimulatorManager.openSimulatorApp()
-            // Give the simulator a moment to fully boot
-            Thread.sleep(forTimeInterval: 2.0)
         }
 
         // Step 3: Determine bundle ID and the process name to match on
