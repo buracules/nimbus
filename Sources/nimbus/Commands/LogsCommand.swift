@@ -19,10 +19,19 @@ struct LogsCommand: ParsableCommand {
             throw ExitCode.failure
         }
 
-        // Step 2: Boot simulator if needed
-        if !match.device.isBooted {
+        // Step 2: Make sure the simulator really is booted.
+        //
+        // The reported state is a hint — it lags a boot or shutdown that is
+        // still in flight — so streaming must not depend on it. `boot` is
+        // idempotent and blocks on `simctl bootstatus`, which is authoritative.
+        // The hint is only good enough to decide whether to bring the
+        // Simulator UI forward.
+        let looksShutdown = !match.device.isBooted
+        if looksShutdown {
             Console.step("Booting simulator...")
-            try SimulatorManager.boot(udid: match.device.udid)
+        }
+        try SimulatorManager.boot(udid: match.device.udid)
+        if looksShutdown {
             try SimulatorManager.openSimulatorApp()
         }
 

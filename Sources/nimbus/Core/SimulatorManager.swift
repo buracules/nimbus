@@ -23,7 +23,34 @@ enum SimulatorManager {
         let devices: [String: [Device]]
     }
 
+    /// A snapshot of the simulators available for building and running, plus
+    /// where it came from.
+    struct Catalog {
+        enum Source: String, Codable {
+            /// Read straight from CoreSimulator's files (~6 ms).
+            case coreSimulatorFiles
+            /// Read via `xcrun simctl list devices --json` (~450 ms).
+            case simctl
+        }
+
+        let groups: [(runtime: String, devices: [Device])]
+        let source: Source
+    }
+
     // MARK: - Device Listing
+
+    /// The devices commands resolve against, from the fast index when it can be
+    /// trusted and `simctl` when it cannot.
+    ///
+    /// Every command resolves a device, so this is the hot path. Load it once
+    /// per command and pass the groups to `findDeviceWithFallback` and
+    /// `suggestDevices` rather than calling this repeatedly.
+    static func availableDevices() throws -> Catalog {
+        if let groups = DeviceIndex.listAvailableDevices() {
+            return Catalog(groups: groups, source: .coreSimulatorFiles)
+        }
+        return Catalog(groups: try listDevices(), source: .simctl)
+    }
 
     /// List simulator devices, grouped by runtime.
     ///
@@ -123,8 +150,11 @@ enum SimulatorManager {
     // MARK: - Device Lookup
 
     /// Find a simulator matching the given name and optional OS version.
-    static func findDevice(name: String, os: String? = nil) throws -> (device: Device, runtime: String)? {
-        let groups = try listDevices()
+    static func findDevice(
+        in groups: [(runtime: String, devices: [Device])],
+        name: String,
+        os: String? = nil
+    ) -> (device: Device, runtime: String)? {
         for group in groups {
             if let os = os, !runtimeMatches(group.runtime, os: os) {
                 continue
@@ -146,19 +176,22 @@ enum SimulatorManager {
     /// 5. First available device
     ///
     /// - Parameters:
+    ///   - groups: The devices to search, grouped by runtime
     ///   - name: Optional device name to search for
     ///   - os: Optional OS version to filter by
     /// - Returns: A tuple of (device, runtime) or nil if no devices exist
-    static func findDeviceWithFallback(name: String?, os: String?) throws -> (device: Device, runtime: String)? {
-        let groups = try listDevices()
-
+    static func findDeviceWithFallback(
+        in groups: [(runtime: String, devices: [Device])],
+        name: String?,
+        os: String?
+    ) -> (device: Device, runtime: String)? {
         // No devices available at all
         if groups.isEmpty {
             return nil
         }
 
         // Try exact match first if name provided
-        if let name = name, let match = try findDevice(name: name, os: os) {
+        if let name = name, let match = findDevice(in: groups, name: name, os: os) {
             return match
         }
 
@@ -198,12 +231,15 @@ enum SimulatorManager {
     /// Suggest device names similar to the given query using fuzzy matching.
     ///
     /// - Parameters:
+    ///   - groups: The devices to search, grouped by runtime
     ///   - query: The device name query that failed to match
     ///   - os: Optional OS version to filter devices by
     /// - Returns: Array of suggested device names (up to 3)
-    static func suggestDevices(for query: String, os: String? = nil) throws -> [String] {
-        let groups = try listDevices()
-
+    static func suggestDevices(
+        in groups: [(runtime: String, devices: [Device])],
+        for query: String,
+        os: String? = nil
+    ) -> [String] {
         // Filter by OS if provided
         let filteredGroups = groups.filter { group in
             guard let os = os else { return true }

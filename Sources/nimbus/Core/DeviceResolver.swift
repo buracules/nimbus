@@ -46,7 +46,14 @@ enum DeviceResolver {
             Console.step("Finding available simulator...")
         }
 
-        guard let found = try SimulatorManager.findDeviceWithFallback(name: requestedDevice, os: os) else {
+        // One enumeration serves the match, the fallback and the suggestions.
+        let catalog = try SimulatorManager.availableDevices()
+
+        guard let found = SimulatorManager.findDeviceWithFallback(
+            in: catalog.groups,
+            name: requestedDevice,
+            os: os
+        ) else {
             Console.error("No simulators available. Run 'nimbus devices' to see available simulators.")
             return nil
         }
@@ -54,7 +61,7 @@ enum DeviceResolver {
         if let requestedDevice = requestedDevice, found.device.name != requestedDevice {
             Console.warning("Device '\(requestedDevice)' not found, using '\(found.device.name)' instead")
 
-            let suggestions = try SimulatorManager.suggestDevices(for: requestedDevice, os: os)
+            let suggestions = SimulatorManager.suggestDevices(in: catalog.groups, for: requestedDevice, os: os)
             if !suggestions.isEmpty {
                 print("  Did you mean: \(suggestions.map { "\"\($0)\"" }.joined(separator: ", "))?")
             }
