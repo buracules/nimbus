@@ -83,17 +83,124 @@ enum ProcessRunner {
         )
     }
 
-    /// Run a command and stream output line-by-line through a handler.
-    /// Returns the exit code.
-    @discardableResult
-    static func stream(
+    /// A child process that is already running, which the caller can stop
+    /// without stopping itself.
+    ///
+    /// `stream` blocks until the child exits, so for a long time the only stop
+    /// signal nimbus had was Ctrl+C killing nimbus and taking the child with
+    /// it. That does not work for an operation whose result depends on being
+    /// asked to stop: `simctl io recordVideo` writes a usable movie when it is
+    /// interrupted and a zero-byte file when it is terminated. It also does not
+    /// work for any caller that is not a terminal — a GUI with a record button
+    /// cannot stop a recording by quitting itself.
+    ///
+    /// So a long-running operation hands back one of these, and whoever owns
+    /// the stop gesture maps onto it.
+    ///
+    /// `wait()` is expected to be called from one thread; `interrupt()` and
+    /// `terminate()` are safe to call from another (a signal source, a UI
+    /// callback) at any time, including after the child has already exited.
+    final class Handle {
+        private let process: Process
+        private let stdoutPipe: Pipe
+        private let stderrPipe: Pipe
+        private let queue: DispatchQueue
+        private let buffers: StreamBuffers
+        private let onStdout: (String) -> Void
+        private let onStderr: (String) -> Void
+
+        private let stateLock = NSLock()
+        private var hasFinished = false
+        private var storedExitCode: Int32 = 0
+
+        fileprivate init(
+            process: Process,
+            stdoutPipe: Pipe,
+            stderrPipe: Pipe,
+            queue: DispatchQueue,
+            buffers: StreamBuffers,
+            onStdout: @escaping (String) -> Void,
+            onStderr: @escaping (String) -> Void
+        ) {
+            self.process = process
+            self.stdoutPipe = stdoutPipe
+            self.stderrPipe = stderrPipe
+            self.queue = queue
+            self.buffers = buffers
+            self.onStdout = onStdout
+            self.onStderr = onStderr
+        }
+
+        var isRunning: Bool { process.isRunning }
+
+        /// Ask the child to stop the way Ctrl+C would — the graceful stop, and
+        /// the only one that makes `recordVideo` write its file.
+        func interrupt() {
+            guard process.isRunning else { return }
+            process.interrupt()
+        }
+
+        /// Stop the child without asking. A child that finalizes work on
+        /// interrupt will not get the chance.
+        func terminate() {
+            guard process.isRunning else { return }
+            process.terminate()
+        }
+
+        /// Block until the child has exited and every line it wrote has been
+        /// delivered. Returns the exit code. Safe to call more than once.
+        @discardableResult
+        func wait() -> Int32 {
+            stateLock.lock()
+            if hasFinished {
+                defer { stateLock.unlock() }
+                return storedExitCode
+            }
+            stateLock.unlock()
+
+            process.waitUntilExit()
+
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            guard !hasFinished else { return storedExitCode }
+
+            drain()
+            storedExitCode = process.terminationStatus
+            hasFinished = true
+            return storedExitCode
+        }
+
+        /// waitUntilExit does not guarantee the readability handlers drained
+        /// the pipes, so detach them and read whatever is left ourselves.
+        private func drain() {
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+            let trailingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            let trailingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+            // sync on the serial queue is the barrier: everything the handlers
+            // already enqueued has run before this block, and this block
+            // delivers the tail before wait() returns.
+            queue.sync {
+                buffers.stdout.append(trailingStdout, emit: onStdout)
+                buffers.stdout.flush(emit: onStdout)
+                buffers.stderr.append(trailingStderr, emit: onStderr)
+                buffers.stderr.flush(emit: onStderr)
+            }
+        }
+    }
+
+    /// Start a command and return a handle to it. The caller decides when to
+    /// stop it and when to wait for it.
+    static func start(
         _ executable: String,
         arguments: [String] = [],
         environment: [String: String]? = nil,
         currentDirectory: String? = nil,
         onStdout: @escaping (String) -> Void,
         onStderr: ((String) -> Void)? = nil
-    ) throws -> Int32 {
+    ) throws -> Handle {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -129,27 +236,37 @@ enum ProcessRunner {
         }
 
         try process.run()
-        process.waitUntilExit()
 
-        // waitUntilExit does not guarantee the handlers drained the pipes, so
-        // detach them and read whatever is left ourselves.
-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        return Handle(
+            process: process,
+            stdoutPipe: stdoutPipe,
+            stderrPipe: stderrPipe,
+            queue: queue,
+            buffers: buffers,
+            onStdout: onStdout,
+            onStderr: emitStderr
+        )
+    }
 
-        let trailingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let trailingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-        // sync on the serial queue is the barrier: everything the handlers
-        // already enqueued has run before this block, and this block delivers
-        // the tail before stream() returns.
-        queue.sync {
-            buffers.stdout.append(trailingStdout, emit: onStdout)
-            buffers.stdout.flush(emit: onStdout)
-            buffers.stderr.append(trailingStderr, emit: emitStderr)
-            buffers.stderr.flush(emit: emitStderr)
-        }
-
-        return process.terminationStatus
+    /// Run a command and stream output line-by-line through a handler.
+    /// Returns the exit code.
+    @discardableResult
+    static func stream(
+        _ executable: String,
+        arguments: [String] = [],
+        environment: [String: String]? = nil,
+        currentDirectory: String? = nil,
+        onStdout: @escaping (String) -> Void,
+        onStderr: ((String) -> Void)? = nil
+    ) throws -> Int32 {
+        try start(
+            executable,
+            arguments: arguments,
+            environment: environment,
+            currentDirectory: currentDirectory,
+            onStdout: onStdout,
+            onStderr: onStderr
+        ).wait()
     }
 
     /// Find an executable in PATH using `which`.
