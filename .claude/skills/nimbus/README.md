@@ -54,10 +54,16 @@ The skill helps Claude understand and use nimbus commands for:
 - Building iOS projects
 - Running apps on simulators with smart device selection
 - Streaming logs in real-time
+- Controlling the simulator — screenshots, recordings, deep links, push
+  notifications, permissions, appearance, status bar, location
 - Interactive device picking
 - Troubleshooting common build issues
 - Setting up configuration
 - Running tests
+
+Most importantly, it documents `--json`: the result envelope, the stable error
+codes, and which commands support it. That is what lets Claude act on a build
+result instead of guessing at decorated terminal text.
 
 ## Requirements
 

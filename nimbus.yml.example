@@ -1,12 +1,18 @@
 # nimbus.yml — place in your project root
 # All fields are optional. Nimbus auto-detects what it can.
 #
+# The file is found by walking up from the current directory, so it works from
+# a subdirectory of a monorepo.
+#
 # You can also set global defaults at ~/.config/nimbus/config.yml
 # Generate one with: nimbus init --global
+# Keep the global one to user preferences only (device, os, configuration,
+# xcbeautify) — project, workspace and scheme are auto-detected per directory,
+# which is what makes git worktrees work.
 
 project: MyApp.xcodeproj       # or workspace: MyApp.xcworkspace
 scheme: MyApp
-device: "iPhone 17"
-os: "26.2"
+device: "iPhone 17 Pro"        # falls back to another simulator if missing
+os: "26.4"                     # matched by version component: "26" matches 26.4
 configuration: Debug
 xcbeautify: true               # true/false/omit for auto-detect
