@@ -294,6 +294,45 @@ Neither accepts `--json` — see [JSON Output](#json-output).
 - **Build timing** — shows elapsed time after every build
 - **Simple config** — one YAML file, all fields optional
 
+## Alfred Workflow
+
+An Alfred 5 workflow (Powerpack required) that drives nimbus from a keyword,
+without a terminal.
+
+```bash
+./alfred/build.sh          # writes alfred/dist/nimbus.alfredworkflow
+open alfred/dist/nimbus.alfredworkflow
+```
+
+Type `nim`. You get the projects that have a pin, newest first, and the
+simulator each one is pinned to. Alfred has no working directory, so the project
+you pick here *is* the context: every action runs nimbus with its working
+directory set to that project's root.
+
+| Key | Action |
+|-----|--------|
+| `↵` | Build, install and launch |
+| `⌘↵` | Screenshot the simulator |
+| `⌥↵` | Start a recording — press again on the same project to stop it |
+| `⌃↵` | Toggle light / dark |
+| `⌘⌥↵` | Pick a different simulator for this project |
+
+Every action finishes with a notification, so `run` and `record` can take as
+long as they take without leaving you guessing.
+
+The first run shows nothing until at least one project has a pin, and says so
+rather than showing an empty list. Pin one with `nimbus use "iPhone 17 Pro"`.
+
+The workflow's configuration has three fields, all optional: where nimbus lives
+(it looks in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`), and where
+screenshots and recordings go (the Desktop by default). `jq` is required; macOS
+15 and later ship it at `/usr/bin/jq`.
+
+The source is in [`alfred/`](./alfred/) — the scripts, the `info.plist`
+generator, and `build.sh`, which assembles them. Nothing in nimbus knows about
+Alfred: the scripts call `nimbus <cmd> --json` and reshape the envelope into
+Alfred's own format, because that format is Alfred's contract, not nimbus's.
+
 ## Claude Code Integration
 
 Nimbus includes a [Claude Code](https://claude.ai/claude-code) skill that helps you build, run, and debug iOS apps with AI assistance.

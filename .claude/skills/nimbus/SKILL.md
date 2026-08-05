@@ -246,6 +246,12 @@ identity is always derived from the working directory. To act on a different
 project, run nimbus with that directory as the child process's working
 directory.
 
+The Alfred workflow in `alfred/` is the worked example of this: Alfred has no
+working directory, so it lists projects with `nimbus projects --json`, and every
+action it runs sets the child process's working directory to the chosen
+`projectRoot`. If you are writing another consumer, do the same — nimbus's
+state directory is private and `use`/`projects` are the contract.
+
 ---
 
 ## Simulator Control (`nimbus sim`)
@@ -503,6 +509,27 @@ You passed `--json` to `logs` or to `run --logs`. Drop one of them.
 | Set location | `nimbus sim location 37.3349,-122.0090` |
 | Shut down simulators | `nimbus sim shutdown --all` |
 | Generate config | `nimbus init` |
+
+---
+
+## Alfred Workflow
+
+`alfred/` holds an Alfred 5 workflow. `./alfred/build.sh` writes an importable
+`alfred/dist/nimbus.alfredworkflow`; the user opens it to install.
+
+You will not be pressing its hotkeys, so what matters to you is where its
+boundary sits. Nothing in nimbus knows about Alfred and nothing should: the
+workflow's own scripts call `nimbus <cmd> --json` and reshape the envelope into
+Alfred's Script Filter format. There is no `nimbus alfred` subcommand and no
+Alfred-shaped output mode. If a future consumer needs a different shape, it
+adapts to nimbus's envelope, not the other way round.
+
+Changing a `--json` payload or an error code therefore breaks it. `alfred/`
+depends on: `projects` (`.data.projects[].projectRoot|device|os`), `devices`
+(`.data.runtimes[].name|devices[].name|state|udid`), `use`
+(`.data.device|os|source|resolution.device.udid`), `run` (`.data.app.bundleID`,
+`.data.build.duration`, `.data.resolution.device.name`), `sim screenshot` and
+`sim record` (`.data.file.path`), and `sim appearance` (`.data.appearance`).
 
 ---
 
