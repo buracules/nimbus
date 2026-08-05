@@ -138,6 +138,9 @@ enum CommandOutput {
         // Sorted keys make the output diffable and reproducible; unescaped
         // slashes keep file paths readable, which is most of what nimbus reports.
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        // The default would emit a bare seconds-since-2001 double, which no
+        // consumer would read correctly by accident.
+        encoder.dateEncodingStrategy = .iso8601
         return encoder
     }
 

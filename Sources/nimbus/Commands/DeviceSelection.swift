@@ -20,7 +20,8 @@ enum DeviceSelection {
         config: NimbusConfig,
         interactive: Bool,
         verbose: Bool,
-        json: Bool = false
+        json: Bool = false,
+        shadowedProjectDevice: String? = nil
     ) throws -> DeviceChoice {
         // A menu prompt and an envelope cannot share stdout, and there is no
         // one on the other end of `--json` to answer a prompt anyway. So
@@ -29,6 +30,19 @@ enum DeviceSelection {
         let ask = interactive && !json
         if interactive && json {
             Console.warning("--interactive is ignored with --json; matching a simulator instead")
+        }
+
+        // A pinned selection outranks the project's `nimbus.yml`, so a committed
+        // `device:` can stop taking effect without the file changing. That is
+        // invisible unless it is said out loud, and it is said at normal
+        // verbosity because a user who does not know to pass `--verbose` is
+        // exactly the one it surprises. Not shown for the interactive menu:
+        // there, the human picked and neither layer supplied anything.
+        if !ask, let shadowed = shadowedProjectDevice, let inEffect = config.device {
+            Console.info(
+                "Using '\(inEffect)' pinned by 'nimbus use' — nimbus.yml's device "
+                    + "'\(shadowed)' is not in effect here (clear it with 'nimbus use --clear')"
+            )
         }
 
         let choice = ask ? try pick(config: config) : try match(config: config)

@@ -20,7 +20,8 @@ struct BuildCommand: ParsableCommand {
     }
 
     private static func perform(options: SharedOptions, interactive: Bool) throws -> BuildPayload {
-        let config = try options.resolvedConfig()
+        let selection = try options.resolvedSelection()
+        let config = selection.config
 
         // Resolve a concrete simulator like run/test do. Without this the
         // destination is `name=<configured device>` verbatim, which fails
@@ -29,7 +30,8 @@ struct BuildCommand: ParsableCommand {
             config: config,
             interactive: interactive,
             verbose: options.verbose,
-            json: options.json
+            json: options.json,
+            shadowedProjectDevice: selection.shadowedProjectDevice
         )
 
         Console.step("Building \(config.scheme ?? "project")...")

@@ -78,6 +78,8 @@ failure, capped at 50 — that is where the "why" of a failed build lives.
 | `test` | `scheme`, `configuration`, `resolution`, `test` |
 | `clean` | `scheme`, `configuration`, `clean` |
 | `devices` | `runtimes` — each with `runtime`, `name`, `devices` |
+| `use` | `projectRoot`, `device`, `os`, `source`, `shadowedProjectDevice`, `resolution`, `cleared` |
+| `projects` | `projects` — each with `projectRoot`, `device`, `os`, `updatedAt` |
 | `init` | `path`, `config` |
 | `sim screenshot` / `sim record` | `resolution`, `file` (`path`) |
 | `sim openurl` | `resolution`, `url` |
@@ -193,6 +195,57 @@ nimbus clean
 nimbus clean --json
 ```
 
+### Pin a Simulator to a Project (`nimbus use`)
+```bash
+nimbus use "iPhone 17 Pro"              # pin it to this project
+nimbus use "iPhone 17 Pro" --os 26.4    # pin a runtime alongside it
+nimbus use                              # what is in effect, and which layer set it
+nimbus use --json
+nimbus use --clear                       # forget this project's pin
+```
+
+The pin is remembered per project and survives across invocations, so
+`nimbus build` / `run` / `test` / `sim ...` all target it without a flag.
+
+`use` resolves the name against the simulators on this machine and **refuses to
+pin one that does not exist** — it fails with `not_found` and puts fuzzy
+suggestions in `error.diagnostics`. That is the point of the command: a name that
+does not resolve never reaches a build.
+
+`data.source` says which layer supplied the device, and is one of:
+
+| `source` | Meaning |
+|----------|---------|
+| `flag` | a `--device` on this invocation |
+| `state` | pinned with `nimbus use` |
+| `project` | the project's `nimbus.yml` |
+| `global` | `~/.config/nimbus/config.yml` |
+| `unset` | nothing named one; nimbus picks an available simulator |
+
+`data.shadowedProjectDevice` is present when a pin is overriding a `device:` in
+the project's `nimbus.yml`. **Surface it to the user** — their committed config
+has stopped taking effect and the file gives no sign of it. Human output says so
+too, at normal verbosity.
+
+`data.projectRoot` is the directory nimbus considers "this project". Use it as
+the identity of a project; do not derive your own.
+
+### List Pinned Projects (`nimbus projects`)
+```bash
+nimbus projects
+nimbus projects --json
+```
+
+Projects that have been pinned with `nimbus use`, most recently pinned first.
+Entries whose directory no longer exists are dropped. Nothing else writes to this
+list — only `use` — so it means "projects where a simulator was deliberately
+chosen", not "projects recently built".
+
+There is **no `--project` flag and no global 'current project'**. Project
+identity is always derived from the working directory. To act on a different
+project, run nimbus with that directory as the child process's working
+directory.
+
 ---
 
 ## Simulator Control (`nimbus sim`)
@@ -264,9 +317,14 @@ configuration: Debug
 xcbeautify: true
 ```
 
-All fields are optional — nimbus auto-detects what it can. The file is found by
-walking up from the current directory, so it works from a subdirectory of a
-monorepo.
+All fields are optional — nimbus auto-detects what it can.
+
+**nimbus works from anywhere inside a project, not only from its root.** It walks
+up parent directories and stops at the first one holding either a `nimbus.yml` or
+an `.xcworkspace`/`.xcodeproj` — nearest wins. That directory is the project root
+(`data.projectRoot` from `nimbus use`), and it is what a pinned simulator is
+filed under. A monorepo with a shared `nimbus.yml` on top and several apps below
+it therefore gets one project root per app, and one pinned simulator each.
 
 ### Generate Configuration
 ```bash
@@ -280,14 +338,26 @@ Global config should only hold user preferences (`device`, `os`,
 `configuration`, `xcbeautify`). `project`, `workspace` and `scheme` are
 auto-detected per directory, which is what makes git worktrees work.
 
-**Priority**: CLI flags > project `nimbus.yml` > global config > auto-detection.
+**Priority**: CLI flags > `nimbus use` pin > project `nimbus.yml` > global config >
+auto-detection.
+
+A pin outranks `nimbus.yml` on purpose: otherwise `nimbus use` would be a silent
+no-op in any project whose config names a `device:`. The cost is that a committed
+`device:` can stop taking effect without the file changing, which is why both the
+human output and `data.shadowedProjectDevice` call it out.
 
 ---
 
 ## Device Selection Strategies
 
+### Sticky Selection (`nimbus use`)
+The most reliable way to stop guessing which simulator a project uses: pin it
+once with `nimbus use "<device>"`, then every later command targets it. Prefer
+this over repeating `--device` on each call, and prefer `nimbus use` over reading
+`nimbus.yml` when you need to know what is actually in effect.
+
 ### Smart Fallback (Default)
-When no device is specified, nimbus picks, in order:
+When nothing is pinned or configured, nimbus picks, in order:
 1. An exact name match (filtered by `--os` if given)
 2. A booted device matching the OS preference
 3. Any booted device
@@ -373,8 +443,13 @@ nimbus devices --all                    # is the simulator even installed?
 - Check the name matches; fuzzy suggestions appear when it does not
 
 ### `matchedRequest: false` when you expected a specific device
-The configured `device` does not exist on this machine. Check
-`nimbus devices --all`, then fix `nimbus.yml` or the global config.
+The configured `device` does not exist on this machine. Run `nimbus use` to see
+which layer supplied it, then fix that layer — or pin a real one with
+`nimbus use "<device>"`, which validates before it saves.
+
+### A `device:` in `nimbus.yml` seems to be ignored
+A `nimbus use` pin outranks it. Run `nimbus use` to confirm (`source` will be
+`state`), and `nimbus use --clear` to hand control back to `nimbus.yml`.
 
 ### `app_bundle_not_found`
 - Build first: `nimbus build` or `nimbus run`
@@ -413,6 +488,10 @@ You passed `--json` to `logs` or to `run --logs`. Drop one of them.
 | Clean | `nimbus clean` |
 | List simulators | `nimbus devices` |
 | List all simulators | `nimbus devices --all` |
+| Pin a simulator to this project | `nimbus use "iPhone 17 Pro"` |
+| Show the simulator in effect | `nimbus use` |
+| Unpin | `nimbus use --clear` |
+| List pinned projects | `nimbus projects` |
 | Pick device interactively | `nimbus run --interactive` |
 | Screenshot | `nimbus sim screenshot` |
 | Record the screen | `nimbus sim record` |

@@ -12,6 +12,8 @@ struct Nimbus: ParsableCommand {
             TestCommand.self,
             CleanCommand.self,
             DevicesCommand.self,
+            UseCommand.self,
+            ProjectsCommand.self,
             LogsCommand.self,
             SimCommand.self,
             InitCommand.self,

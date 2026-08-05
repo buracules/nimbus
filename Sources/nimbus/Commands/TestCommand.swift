@@ -20,7 +20,8 @@ struct TestCommand: ParsableCommand {
     }
 
     private static func perform(options: SharedOptions, interactive: Bool) throws -> TestPayload {
-        let config = try options.resolvedConfig()
+        let selection = try options.resolvedSelection()
+        let config = selection.config
 
         // Resolve a concrete simulator: without one, xcodebuild test runs with
         // no -destination and either fails or picks an arbitrary device.
@@ -28,7 +29,8 @@ struct TestCommand: ParsableCommand {
             config: config,
             interactive: interactive,
             verbose: options.verbose,
-            json: options.json
+            json: options.json,
+            shadowedProjectDevice: selection.shadowedProjectDevice
         )
 
         Console.step("Testing \(config.scheme ?? "project")...")

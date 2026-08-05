@@ -22,10 +22,14 @@ struct SharedOptions: ParsableArguments {
     @Flag(name: .long, help: "Emit a JSON result envelope on stdout instead of human output")
     var json = false
 
-    /// Load configs and merge: global < project < CLI flags.
+    /// Load configs and merge: global < project < sticky state < CLI flags.
     func resolvedConfig() throws -> NimbusConfig {
-        let globalConfig = try ConfigLoader.loadGlobal()
-        let projectConfig = try ConfigLoader.loadProject()
+        try resolvedSelection().config
+    }
+
+    /// The same merge, plus what the user needs to be told about where the
+    /// device came from. Commands that select a simulator want this one.
+    func resolvedSelection() throws -> ConfigResolution {
         let cliConfig = NimbusConfig(
             project: nil,
             workspace: nil,
@@ -36,14 +40,10 @@ struct SharedOptions: ParsableArguments {
             xcbeautify: nil
         )
 
-        if globalConfig != .empty {
-            Console.verbose("Loaded global config: \(ConfigLoader.globalConfigPath)", isVerbose: verbose)
-        }
-        if let projectPath = ConfigLoader.findConfigFile() {
-            Console.verbose("Loaded project config: \(projectPath)", isVerbose: verbose)
-        }
+        var resolution = try SelectionChain.resolve(cli: cliConfig)
+        resolution.narrateLayers(verbose: verbose)
 
-        var merged = globalConfig.merging(with: projectConfig).merging(with: cliConfig)
+        var merged = resolution.config
 
         // If still no scheme, try auto-detection
         if merged.scheme == nil {
@@ -66,7 +66,8 @@ struct SharedOptions: ParsableArguments {
             }
         }
 
-        return merged
+        resolution.config = merged
+        return resolution
     }
 
     // MARK: - Scheme Auto-detection

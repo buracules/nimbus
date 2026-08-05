@@ -22,22 +22,27 @@ struct DeviceOptions: ParsableArguments {
     @Flag(name: .long, help: "Emit a JSON result envelope on stdout instead of human output")
     var json = false
 
-    /// Config for device selection only: global < project < CLI flags, with no
-    /// scheme detection.
+    /// Config for device selection only: global < project < sticky state < CLI
+    /// flags, with no scheme detection.
     func resolvedConfig() throws -> NimbusConfig {
-        let globalConfig = try ConfigLoader.loadGlobal()
-        let projectConfig = try ConfigLoader.loadProject()
-        let cliConfig = NimbusConfig(device: device, os: os)
-        return globalConfig.merging(with: projectConfig).merging(with: cliConfig)
+        try resolvedSelection().config
+    }
+
+    func resolvedSelection() throws -> ConfigResolution {
+        let resolution = try SelectionChain.resolve(cli: NimbusConfig(device: device, os: os))
+        resolution.narrateLayers(verbose: verbose)
+        return resolution
     }
 
     /// Resolve the simulator this command targets.
     func selectDevice() throws -> DeviceChoice {
-        try DeviceSelection.choose(
-            config: try resolvedConfig(),
+        let resolution = try resolvedSelection()
+        return try DeviceSelection.choose(
+            config: resolution.config,
             interactive: interactive,
             verbose: verbose,
-            json: json
+            json: json,
+            shadowedProjectDevice: resolution.shadowedProjectDevice
         )
     }
 

@@ -38,14 +38,16 @@ struct LogsCommand: ParsableCommand {
             )
         }
 
-        let config = try options.resolvedConfig()
+        let selection = try options.resolvedSelection()
+        let config = selection.config
 
         // Step 1: Find simulator (interactive or fallback)
         let device = try DeviceSelection.choose(
             config: config,
             interactive: interactive,
             verbose: options.verbose,
-            json: options.json
+            json: options.json,
+            shadowedProjectDevice: selection.shadowedProjectDevice
         ).device
 
         // Step 2: Make sure the simulator really is booted.

@@ -62,6 +62,41 @@ struct DevicesPayload: Encodable {
     let runtimes: [RuntimeGroup]
 }
 
+// MARK: - Sticky selection
+
+struct UsePayload: Encodable {
+    /// The directory that identifies this project. The only thing a consumer
+    /// needs in order to talk about "the same project" later.
+    let projectRoot: String
+    /// The device in effect, or nil when no layer names one.
+    let device: String?
+    let os: String?
+    /// Which layer supplied `device`.
+    let source: DeviceSource
+    /// The `nimbus.yml` device a pinned selection is overriding, when there is
+    /// one. Present so a caller can surface the same hazard the human output
+    /// does.
+    let shadowedProjectDevice: String?
+    /// How `device` matches a simulator here. Nil only when this machine has no
+    /// simulators at all.
+    let resolution: DeviceResolution?
+    /// True when this invocation removed a pinned selection.
+    var cleared: Bool
+}
+
+struct ProjectsPayload: Encodable {
+    struct Entry: Encodable {
+        let projectRoot: String
+        let device: String
+        let os: String?
+        /// When the selection was pinned. Authoritative for the ordering of
+        /// this list.
+        let updatedAt: Date
+    }
+
+    let projects: [Entry]
+}
+
 // MARK: - Init
 
 struct InitPayload: Encodable {
