@@ -17,6 +17,8 @@ set -u
 cd "$(dirname "$0")" || exit 1
 # shellcheck source=lib.sh
 . ./lib.sh
+# shellcheck source=icons.sh
+. ./icons.sh
 
 sf_require_tools || exit 0
 
@@ -49,6 +51,14 @@ if [ "$count" = "0" ]; then
     exit 0
 fi
 
+# One icon per project, so the list is scannable by sight rather than by reading.
+# This is the only thing here that touches the filesystem beyond nimbus's answer,
+# and it is cached and depth-bounded because one of these projects is a 16 GB
+# repo — see icons.sh. It cannot fail the list: the worst it returns is an empty
+# map, and a project with no entry simply has no icon key.
+icons="$(icon_map_for_envelope "$envelope")"
+[ -n "$icons" ] || icons='{}'
+
 # Nothing here checks whether a project root still exists. `nimbus projects`
 # already drops entries whose directory is gone, and re-deriving that would be a
 # second opinion about a fact nimbus states. The race it leaves — a directory
@@ -57,9 +67,20 @@ fi
 printf '%s' "$envelope" | jq \
     --arg home "$HOME" \
     --arg shotdir "${screenshot_dir:-$HOME/Desktop}" \
+    --argjson icons "$icons" \
     '
     def shorten($p):
         if ($p | startswith($home + "/")) then "~" + $p[($home | length):] else $p end;
+
+    # Alfred wants {path} for an image and {type: "fileicon", path} for "draw
+    # whatever Finder draws". No entry means no icon key at all, which is how
+    # Alfred is told to fall back to the workflow icon.
+    def icon_for($p):
+        ($icons[$p] // {}) as $i
+        | if (($i.path // "") == "") then {}
+          elif (($i.type // "") == "") then { icon: { path: $i.path } }
+          else { icon: { type: $i.type, path: $i.path } }
+          end;
 
     { items: (.data.projects | map(
         .projectRoot as $root
@@ -67,7 +88,7 @@ printf '%s' "$envelope" | jq \
         | (.os | if . then " (OS " + . + ")" else "" end) as $ostag
         | (($root | split("/") | last) // $root) as $name
         | ({ projectRoot: $root, projectName: $name, projectDevice: $device }) as $vars
-        | {
+        | icon_for($root) + {
             title: $name,
             subtitle: ("Build and run on " + $device + $ostag + "  ·  " + shorten($root)),
             match: ($name + " " + $root + " " + $device),

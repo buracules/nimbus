@@ -23,8 +23,10 @@ python3 "$here/make-info-plist.py"
 /usr/bin/plutil -lint "$source_dir/info.plist" >/dev/null
 
 for script in "$source_dir"/*.sh; do
+    # Libraries are sourced by the scripts Alfred runs, never run themselves, so
+    # the executable bit would say something untrue about them.
     case "$(basename "$script")" in
-        lib.sh) continue ;;
+        lib.sh|icons.sh) continue ;;
     esac
     if [ ! -x "$script" ]; then
         echo "error: $script is not executable; Alfred would not be able to run it" >&2
