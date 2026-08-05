@@ -12,13 +12,40 @@ struct LogsCommand: ParsableCommand {
     @Flag(name: .long, help: "Interactively select a simulator") var interactive = false
 
     mutating func run() throws {
+        let options = self.options
+        let interactive = self.interactive
+        let bundleID = self.bundleID
+
+        try CommandRunner.run("logs", json: options.json) { () -> EmptyPayload in
+            try Self.perform(options: options, interactive: interactive, bundleID: bundleID)
+            return EmptyPayload()
+        }
+    }
+
+    private static func perform(
+        options: SharedOptions,
+        interactive: Bool,
+        bundleID: String?
+    ) throws {
+        // A log stream owns stdout for as long as it runs, so there is no
+        // moment at which an envelope could be written to the same place.
+        // Refuse the combination instead of pretending one of them worked.
+        if options.json {
+            throw NimbusFailure(
+                .unsupportedOutputMode,
+                "--json cannot be combined with logs: a log stream and a JSON envelope cannot "
+                    + "share stdout. Run 'nimbus logs' without --json."
+            )
+        }
+
         let config = try options.resolvedConfig()
 
         // Step 1: Find simulator (interactive or fallback)
         let device = try DeviceSelection.choose(
             config: config,
             interactive: interactive,
-            verbose: options.verbose
+            verbose: options.verbose,
+            json: options.json
         ).device
 
         // Step 2: Make sure the simulator really is booted.
@@ -47,24 +74,30 @@ struct LogsCommand: ParsableCommand {
         } else {
             // Auto-detect from scheme
             guard config.scheme != nil else {
-                Console.error("Cannot determine bundle ID. Specify --bundle-id or --scheme.")
-                throw ExitCode.failure
+                throw NimbusFailure(
+                    .schemeUnknown,
+                    "Cannot determine bundle ID. Specify --bundle-id or --scheme."
+                )
             }
 
             let runner = XcodeBuildRunner(config: config, destinationUDID: device.udid)
             guard let appPath = BuildExecutor.locateAppBundle(runner: runner, verbose: options.verbose) else {
-                Console.error("Built app not found. Build the app first with 'nimbus run' or 'nimbus build'.")
-                throw ExitCode.failure
+                throw NimbusFailure(
+                    .appBundleNotFound,
+                    "Built app not found. Build the app first with 'nimbus run' or 'nimbus build'."
+                )
             }
 
-            guard let bundleID = SimulatorManager.bundleIdentifier(appPath: appPath) else {
-                Console.error("Could not determine bundle identifier from app at \(appPath)")
-                throw ExitCode.failure
+            guard let detected = SimulatorManager.bundleIdentifier(appPath: appPath) else {
+                throw NimbusFailure(
+                    .bundleIdentifierUnknown,
+                    "Could not determine bundle identifier from app at \(appPath)"
+                )
             }
 
-            appBundleID = bundleID
+            appBundleID = detected
             executableName = SimulatorManager.executableName(appPath: appPath)
-                ?? Self.processName(fromBundleID: bundleID)
+                ?? Self.processName(fromBundleID: detected)
         }
 
         // Step 4: Stream logs
@@ -73,7 +106,7 @@ struct LogsCommand: ParsableCommand {
 
         Console.step("Streaming logs for \(appBundleID) on \(device.name)...")
         Console.info("Press Ctrl+C to stop")
-        print()
+        Console.detail()
 
         let exitCode = try ProcessRunner.stream(
             "/usr/bin/xcrun",
@@ -93,7 +126,11 @@ struct LogsCommand: ParsableCommand {
         )
 
         if exitCode != 0 {
-            throw ExitCode(exitCode)
+            throw NimbusFailure(
+                .commandFailed,
+                "simctl spawn log stream exited with \(exitCode)",
+                exitCode: exitCode
+            )
         }
     }
 

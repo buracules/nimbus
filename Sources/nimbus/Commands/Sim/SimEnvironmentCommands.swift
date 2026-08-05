@@ -13,16 +13,22 @@ struct SimAppearanceCommand: ParsableCommand {
     var style: SimulatorControl.Appearance?
 
     mutating func run() throws {
-        let choice = try options.selectBootedDevice()
+        let options = self.options
+        let style = self.style
 
-        guard let style else {
-            let current = try SimulatorControl.currentAppearance(udid: choice.device.udid)
-            Console.info("Appearance on \(choice.device.name): \(current)")
-            return
+        try CommandRunner.run("sim appearance", json: options.json) {
+            let choice = try options.selectBootedDevice()
+
+            guard let style else {
+                let current = try SimulatorControl.currentAppearance(udid: choice.device.udid)
+                Console.info("Appearance on \(choice.device.name): \(current)")
+                return SimAppearancePayload(resolution: choice.resolution, appearance: current)
+            }
+
+            try SimulatorControl.setAppearance(udid: choice.device.udid, style: style)
+            Console.success("Appearance set to \(style.rawValue) on \(choice.device.name)")
+            return SimAppearancePayload(resolution: choice.resolution, appearance: style.rawValue)
         }
-
-        try SimulatorControl.setAppearance(udid: choice.device.udid, style: style)
-        Console.success("Appearance set to \(style.rawValue) on \(choice.device.name)")
     }
 }
 
@@ -59,6 +65,8 @@ struct SimStatusBarCommand: ParsableCommand {
     var operatorName: String?
 
     mutating func run() throws {
+        let options = self.options
+        let clear = self.clear
         let overrides = Self.overrideArguments(
             time: time,
             batteryLevel: batteryLevel,
@@ -69,21 +77,26 @@ struct SimStatusBarCommand: ParsableCommand {
             operatorName: operatorName
         )
 
-        guard clear || !overrides.isEmpty else {
-            Console.error("Nothing to do. Pass --clear or at least one override such as --time 9:41.")
-            throw ExitCode.failure
+        try CommandRunner.run("sim statusbar", json: options.json) {
+            guard clear || !overrides.isEmpty else {
+                throw NimbusFailure(
+                    .invalidArguments,
+                    "Nothing to do. Pass --clear or at least one override such as --time 9:41."
+                )
+            }
+
+            let choice = try options.selectBootedDevice()
+
+            if clear {
+                try SimulatorControl.clearStatusBar(udid: choice.device.udid)
+                Console.success("Status bar overrides cleared on \(choice.device.name)")
+                return SimStatusBarPayload(resolution: choice.resolution, cleared: true, overrides: [])
+            }
+
+            try SimulatorControl.overrideStatusBar(udid: choice.device.udid, overrides: overrides)
+            Console.success("Status bar updated on \(choice.device.name)")
+            return SimStatusBarPayload(resolution: choice.resolution, cleared: false, overrides: overrides)
         }
-
-        let choice = try options.selectBootedDevice()
-
-        if clear {
-            try SimulatorControl.clearStatusBar(udid: choice.device.udid)
-            Console.success("Status bar overrides cleared on \(choice.device.name)")
-            return
-        }
-
-        try SimulatorControl.overrideStatusBar(udid: choice.device.udid, overrides: overrides)
-        Console.success("Status bar updated on \(choice.device.name)")
     }
 
     /// Translate nimbus's flags into simctl's. Pure, so the mapping is testable.
@@ -123,29 +136,47 @@ struct SimLocationCommand: ParsableCommand {
     var clear = false
 
     mutating func run() throws {
-        if clear {
+        let options = self.options
+        let clear = self.clear
+        let coordinates = self.coordinates
+
+        try CommandRunner.run("sim location", json: options.json) {
+            if clear {
+                let choice = try options.selectBootedDevice()
+                try SimulatorControl.clearLocation(udid: choice.device.udid)
+                Console.success("Location cleared on \(choice.device.name)")
+                return SimLocationPayload(
+                    resolution: choice.resolution,
+                    cleared: true,
+                    latitude: nil,
+                    longitude: nil
+                )
+            }
+
+            guard let coordinates else {
+                throw NimbusFailure(
+                    .invalidArguments,
+                    "Pass coordinates as lat,lon — e.g. 37.3349,-122.0090 — or --clear."
+                )
+            }
+            guard let point = Self.parseCoordinates(coordinates) else {
+                throw NimbusFailure(.invalidArguments, "Could not read '\(coordinates)' as lat,lon.")
+            }
+
             let choice = try options.selectBootedDevice()
-            try SimulatorControl.clearLocation(udid: choice.device.udid)
-            Console.success("Location cleared on \(choice.device.name)")
-            return
+            try SimulatorControl.setLocation(
+                udid: choice.device.udid,
+                latitude: point.latitude,
+                longitude: point.longitude
+            )
+            Console.success("Location set to \(point.latitude),\(point.longitude) on \(choice.device.name)")
+            return SimLocationPayload(
+                resolution: choice.resolution,
+                cleared: false,
+                latitude: point.latitude,
+                longitude: point.longitude
+            )
         }
-
-        guard let coordinates else {
-            Console.error("Pass coordinates as lat,lon — e.g. 37.3349,-122.0090 — or --clear.")
-            throw ExitCode.failure
-        }
-        guard let point = Self.parseCoordinates(coordinates) else {
-            Console.error("Could not read '\(coordinates)' as lat,lon.")
-            throw ExitCode.failure
-        }
-
-        let choice = try options.selectBootedDevice()
-        try SimulatorControl.setLocation(
-            udid: choice.device.udid,
-            latitude: point.latitude,
-            longitude: point.longitude
-        )
-        Console.success("Location set to \(point.latitude),\(point.longitude) on \(choice.device.name)")
     }
 
     /// Parse `lat,lon`, rejecting anything out of range rather than handing

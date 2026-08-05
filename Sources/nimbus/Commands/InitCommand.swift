@@ -13,21 +13,25 @@ struct InitCommand: ParsableCommand {
     @Flag(name: .long, help: "Write to global config (~/.config/nimbus/config.yml) instead of project")
     var global = false
 
+    @Flag(name: .long, help: "Emit a JSON result envelope on stdout instead of human output")
+    var json = false
+
     mutating func run() throws {
-        if global {
-            try runGlobal()
-        } else {
-            try runProject()
+        let force = self.force
+        let global = self.global
+        let json = self.json
+
+        try CommandRunner.run("init", json: json) {
+            global ? try Self.runGlobal(force: force) : try Self.runProject(force: force)
         }
     }
 
-    private func runGlobal() throws {
+    private static func runGlobal(force: Bool) throws -> InitPayload {
         let configPath = ConfigLoader.globalConfigPath
         let configDir = (configPath as NSString).deletingLastPathComponent
 
         if FileManager.default.fileExists(atPath: configPath) && !force {
-            Console.error("\(configPath) already exists. Use --force to overwrite.")
-            throw ExitCode.failure
+            throw NimbusFailure(.configExists, "\(configPath) already exists. Use --force to overwrite.")
         }
 
         // Create ~/.config/nimbus/ if it doesn't exist
@@ -46,16 +50,17 @@ struct InitCommand: ParsableCommand {
 
         Console.success("Generated global config: \(configPath)")
         Console.info("Note: project/workspace/scheme are auto-detected per directory")
-        print()
-        print(yaml)
+        Console.detail()
+        Console.detail(yaml)
+
+        return InitPayload(path: configPath, config: config)
     }
 
-    private func runProject() throws {
+    private static func runProject(force: Bool) throws -> InitPayload {
         let configPath = FileManager.default.currentDirectoryPath + "/nimbus.yml"
 
         if FileManager.default.fileExists(atPath: configPath) && !force {
-            Console.error("nimbus.yml already exists. Use --force to overwrite.")
-            throw ExitCode.failure
+            throw NimbusFailure(.configExists, "nimbus.yml already exists. Use --force to overwrite.")
         }
 
         Console.step("Detecting project settings...")
@@ -97,7 +102,9 @@ struct InitCommand: ParsableCommand {
         try yaml.write(toFile: configPath, atomically: true, encoding: .utf8)
 
         Console.success("Generated nimbus.yml")
-        print()
-        print(yaml)
+        Console.detail()
+        Console.detail(yaml)
+
+        return InitPayload(path: configPath, config: config)
     }
 }

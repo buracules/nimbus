@@ -12,6 +12,18 @@ enum DevicePicker {
         groups: [(runtime: String, devices: [SimulatorManager.Device])],
         os: String? = nil
     ) throws -> (device: SimulatorManager.Device, runtime: String)? {
+        // The menu writes a prompt to stdout and blocks on stdin. Under
+        // `--json` stdout belongs to the envelope and there is nobody to
+        // answer, so refuse here rather than trust every caller to remember.
+        // `DeviceSelection` already downgrades `--interactive` to matching, so
+        // reaching this is a bug, not a user error.
+        guard !Console.isMachineReadable else {
+            throw NimbusFailure(
+                .unsupportedOutputMode,
+                "Interactive device selection cannot run with --json."
+            )
+        }
+
         guard !groups.isEmpty else {
             Console.error("No simulators available")
             return nil

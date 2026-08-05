@@ -14,8 +14,20 @@ enum Console {
         case reset = "\u{001B}[0m"
     }
 
+    /// True when stdout is carrying a machine-readable envelope rather than
+    /// text for a human.
+    ///
+    /// One writer: `CommandRunner` sets it once, before the command body runs
+    /// and therefore before any subprocess or stream queue exists. Everything
+    /// else only reads it.
+    private(set) static var isMachineReadable = false
+
+    static func setMachineReadable(_ enabled: Bool) {
+        isMachineReadable = enabled
+    }
+
     private static var colorsEnabled: Bool {
-        isatty(fileno(stdout)) != 0
+        !isMachineReadable && isatty(fileno(stdout)) != 0
     }
 
     static func colored(_ text: String, _ color: Color) -> String {
@@ -23,16 +35,31 @@ enum Console {
         return "\(color.rawValue)\(text)\(Color.reset.rawValue)"
     }
 
+    /// Where narration goes.
+    ///
+    /// Under `--json` stdout is reserved for the envelope, so everything a
+    /// human would have read moves to stderr rather than disappearing — the
+    /// information is still there for whoever is watching, it just stops
+    /// corrupting the parse.
+    private static func narrate(_ line: String) {
+        if isMachineReadable {
+            var stderr = FileHandle.standardError
+            print(line, to: &stderr)
+        } else {
+            print(line)
+        }
+    }
+
     static func info(_ message: String) {
-        print("\(colored("▸", .cyan)) \(message)")
+        narrate("\(colored("▸", .cyan)) \(message)")
     }
 
     static func success(_ message: String) {
-        print("\(colored("✓", .green)) \(message)")
+        narrate("\(colored("✓", .green)) \(message)")
     }
 
     static func warning(_ message: String) {
-        print("\(colored("⚠", .yellow)) \(message)")
+        narrate("\(colored("⚠", .yellow)) \(message)")
     }
 
     static func error(_ message: String) {
@@ -41,12 +68,18 @@ enum Console {
     }
 
     static func step(_ message: String) {
-        print("\(colored("▸", .bold)) \(message)")
+        narrate("\(colored("▸", .bold)) \(message)")
+    }
+
+    /// An unadorned line that belongs with whatever was just narrated —
+    /// a continuation, a blank separator, an echoed file.
+    static func detail(_ message: String = "") {
+        narrate(message)
     }
 
     static func verbose(_ message: String, isVerbose: Bool) {
         guard isVerbose else { return }
-        print("\(colored("  ›", .dim)) \(message)")
+        narrate("\(colored("  ›", .dim)) \(message)")
     }
 }
 

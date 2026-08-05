@@ -13,19 +13,26 @@ struct SimShutdownCommand: ParsableCommand {
     var all = false
 
     mutating func run() throws {
-        let outcomes = all ? try shutdownAll() : try shutdownResolved()
+        let options = self.options
+        let all = self.all
 
-        let stopped = outcomes.filter(\.wasBooted)
-        guard !stopped.isEmpty else {
-            Console.info("Nothing to shut down — no booted simulators")
-            return
-        }
-        for outcome in stopped {
-            Console.success("Shut down \(outcome.name)")
+        try CommandRunner.run("sim shutdown", json: options.json) {
+            let outcomes = all
+                ? try Self.shutdownAll()
+                : try Self.shutdownResolved(options: options)
+
+            let stopped = outcomes.filter(\.wasBooted)
+            if stopped.isEmpty {
+                Console.info("Nothing to shut down — no booted simulators")
+            }
+            for outcome in stopped {
+                Console.success("Shut down \(outcome.name)")
+            }
+            return SimShutdownPayload(devices: stopped)
         }
     }
 
-    private func shutdownAll() throws -> [SimulatorControl.ShutdownOutcome] {
+    private static func shutdownAll() throws -> [SimulatorControl.ShutdownOutcome] {
         // Which devices are booted is exactly the thing the fast index reports
         // late, and shutting the wrong set down is not recoverable by
         // retrying, so ask the authority.
@@ -39,7 +46,7 @@ struct SimShutdownCommand: ParsableCommand {
         }
     }
 
-    private func shutdownResolved() throws -> [SimulatorControl.ShutdownOutcome] {
+    private static func shutdownResolved(options: DeviceOptions) throws -> [SimulatorControl.ShutdownOutcome] {
         // Never boot something on the way to shutting it down.
         let choice = try options.selectDevice()
         let device = choice.device

@@ -16,11 +16,19 @@ struct SimScreenshotCommand: ParsableCommand {
     var type: String?
 
     mutating func run() throws {
-        let choice = try options.selectBootedDevice()
-        let target = path.map(SimPaths.absolute) ?? SimPaths.defaultPath(prefix: "screenshot", extension: type ?? "png")
+        let options = self.options
+        let path = self.path
+        let type = self.type
 
-        let file = try SimulatorControl.screenshot(udid: choice.device.udid, path: target, type: type)
-        Console.success("Screenshot saved to \(file.path)")
+        try CommandRunner.run("sim screenshot", json: options.json) {
+            let choice = try options.selectBootedDevice()
+            let target = path.map(SimPaths.absolute)
+                ?? SimPaths.defaultPath(prefix: "screenshot", extension: type ?? "png")
+
+            let file = try SimulatorControl.screenshot(udid: choice.device.udid, path: target, type: type)
+            Console.success("Screenshot saved to \(file.path)")
+            return SimCapturePayload(resolution: choice.resolution, file: file)
+        }
     }
 }
 
@@ -39,6 +47,25 @@ struct SimRecordCommand: ParsableCommand {
     var codec: String?
 
     mutating func run() throws {
+        let options = self.options
+        let path = self.path
+        let codec = self.codec
+
+        try CommandRunner.run("sim record", json: options.json) {
+            try Self.perform(options: options, path: path, codec: codec)
+        }
+    }
+
+    /// Records until interrupted, then reports the movie.
+    ///
+    /// This is long-running but it is not a stream: nothing goes to stdout
+    /// while it runs, so the envelope at the end is safe. `logs` is the
+    /// opposite case, and refuses `--json` for exactly that reason.
+    private static func perform(
+        options: DeviceOptions,
+        path: String?,
+        codec: String?
+    ) throws -> SimCapturePayload {
         let choice = try options.selectBootedDevice()
         let target = path.map(SimPaths.absolute) ?? SimPaths.defaultPath(prefix: "recording", extension: "mov")
         let isVerbose = options.verbose
@@ -62,9 +89,16 @@ struct SimRecordCommand: ParsableCommand {
         }
 
         guard exitCode == 0 else {
-            Console.error("Recording failed (exit \(exitCode))")
-            throw ExitCode.failure
+            throw NimbusFailure(
+                .commandFailed,
+                "Recording failed (exit \(exitCode))",
+                exitCode: exitCode
+            )
         }
         Console.success("Recording saved to \(recording.path)")
+        return SimCapturePayload(
+            resolution: choice.resolution,
+            file: SimulatorControl.CapturedFile(path: recording.path)
+        )
     }
 }

@@ -6,7 +6,7 @@ import Foundation
 /// Every line a caller might want to print is derivable from these fields.
 /// Choosing a device and telling a human about it are two different jobs, and
 /// only the first one belongs here.
-struct DeviceResolution {
+struct DeviceResolution: Codable {
     let device: SimulatorManager.Device
     let runtime: String
     /// The device name that was asked for, if one was configured.

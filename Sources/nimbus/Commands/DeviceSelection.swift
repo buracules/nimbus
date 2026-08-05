@@ -19,9 +19,19 @@ enum DeviceSelection {
     static func choose(
         config: NimbusConfig,
         interactive: Bool,
-        verbose: Bool
+        verbose: Bool,
+        json: Bool = false
     ) throws -> DeviceChoice {
-        let choice = interactive ? try pick(config: config) : try match(config: config)
+        // A menu prompt and an envelope cannot share stdout, and there is no
+        // one on the other end of `--json` to answer a prompt anyway. So
+        // `--json` means "match, never ask" — and says so rather than
+        // silently ignoring the flag the caller passed.
+        let ask = interactive && !json
+        if interactive && json {
+            Console.warning("--interactive is ignored with --json; matching a simulator instead")
+        }
+
+        let choice = ask ? try pick(config: config) : try match(config: config)
         Console.verbose(
             "Selected: \(choice.device.name) (\(choice.device.udid))",
             isVerbose: verbose
@@ -38,8 +48,7 @@ enum DeviceSelection {
         let groups = try SimulatorManager.listDevices()
 
         guard let selected = try DevicePicker.selectDevice(groups: groups, os: config.os) else {
-            Console.info("No device selected")
-            throw ExitCode.failure
+            throw NimbusFailure(.noDeviceSelected, "No device selected")
         }
         return DeviceChoice(device: selected.device, runtime: selected.runtime, resolution: nil)
     }
@@ -54,8 +63,10 @@ enum DeviceSelection {
         }
 
         guard let resolution = try DeviceResolver.resolveDevice(config: config) else {
-            Console.error("No simulators available. Run 'nimbus devices' to see available simulators.")
-            throw ExitCode.failure
+            throw NimbusFailure(
+                .noSimulators,
+                "No simulators available. Run 'nimbus devices' to see available simulators."
+            )
         }
 
         narrate(resolution)
@@ -77,7 +88,7 @@ enum DeviceSelection {
             Console.warning("Device '\(requested)' not found, using '\(resolution.device.name)' instead")
             if !resolution.suggestions.isEmpty {
                 let names = resolution.suggestions.map { "\"\($0)\"" }.joined(separator: ", ")
-                print("  Did you mean: \(names)?")
+                Console.detail("  Did you mean: \(names)?")
             }
             return
         }

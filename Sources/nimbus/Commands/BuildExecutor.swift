@@ -9,37 +9,85 @@ import Foundation
 /// means spawning xcodebuild here rather than through core, so the arguments
 /// come from `XcodeBuildRunner.buildArguments` either way.
 enum BuildExecutor {
+    /// An xcodebuild action that has finished, plus the lines that explain it
+    /// if it failed.
+    ///
+    /// `BuildResult` is core's and says whether the action succeeded.
+    /// Diagnostics are the CLI's problem: they exist so `--json` can answer
+    /// *why* a build failed without a caller scraping the terminal.
+    struct Execution {
+        let result: BuildResult
+        let diagnostics: [String]
+    }
+
     static func execute(
         action: XcodeBuildRunner.Action,
         runner: XcodeBuildRunner,
         verbose: Bool
-    ) throws -> BuildResult {
+    ) throws -> Execution {
         guard let xcodebuild = ProjectDetector.findXcodebuild() else {
-            Console.error("xcodebuild not found. Is Xcode installed?")
-            throw ExitCode.failure
+            throw NimbusFailure(.xcodebuildNotFound, "xcodebuild not found. Is Xcode installed?")
         }
 
         let args = runner.buildArguments(for: action, destination: runner.resolvedDestination)
         Console.verbose("xcodebuild \(args.joined(separator: " "))", isVerbose: verbose)
 
-        let result: BuildResult
-        if shouldUseXcbeautify(config: runner.config), let xcbeautify = ProcessRunner.which("xcbeautify") {
-            result = try runPipedThroughXcbeautify(
+        let execution: Execution
+        if Console.isMachineReadable {
+            // xcbeautify writes straight to this process's stdout, which is
+            // reserved for the envelope, so it is not an option here. The
+            // formatter is also pointless — nothing decorated is going to be
+            // read. Collect the reason instead, and only echo the raw log to
+            // stderr when someone asked to watch it.
+            execution = try runCollectingDiagnostics(runner: runner, action: action, verbose: verbose)
+        } else if shouldUseXcbeautify(config: runner.config), let xcbeautify = ProcessRunner.which("xcbeautify") {
+            let result = try runPipedThroughXcbeautify(
                 xcodebuild: xcodebuild,
                 args: args,
                 xcbeautifyPath: xcbeautify
             )
+            execution = Execution(result: result, diagnostics: [])
         } else {
             let reporter = ProgressReporter(verbose: verbose)
-            result = try runner.run(action: action) { line in
+            var diagnostics = BuildDiagnostics()
+            let result = try runner.run(action: action) { line in
+                diagnostics.consider(line)
                 if let formatted = reporter.format(line: line) {
                     print(formatted)
                 }
             }
+            execution = Execution(result: result, diagnostics: diagnostics.lines)
         }
 
-        printTimeSummary(result)
-        return result
+        printTimeSummary(execution.result)
+        return execution
+    }
+
+    private static func runCollectingDiagnostics(
+        runner: XcodeBuildRunner,
+        action: XcodeBuildRunner.Action,
+        verbose: Bool
+    ) throws -> Execution {
+        var diagnostics = BuildDiagnostics()
+        let result = try runner.run(action: action) { line in
+            diagnostics.consider(line)
+            Console.verbose(line, isVerbose: verbose)
+        }
+        return Execution(result: result, diagnostics: diagnostics.lines)
+    }
+
+    /// Turn a failed action into a coded failure carrying its reason.
+    ///
+    /// The elapsed time goes in the message because a failed action has no
+    /// `data` in the envelope to put it in, and it is the one fact a human
+    /// wants alongside "it failed".
+    static func failure(_ code: NimbusErrorCode, _ message: String, from execution: Execution) -> NimbusFailure {
+        NimbusFailure(
+            code,
+            "\(message) after \(BuildTimer.format(execution.result.duration))",
+            exitCode: execution.result.exitCode,
+            diagnostics: execution.diagnostics
+        )
     }
 
     // MARK: - App bundle
@@ -122,12 +170,11 @@ enum BuildExecutor {
         )
     }
 
+    /// Only successes are announced here. A failure is announced once, by
+    /// whoever reports the failure — saying it in both places is how the human
+    /// output ended up with two "Build failed" lines.
     private static func printTimeSummary(_ result: BuildResult) {
-        let elapsed = BuildTimer.format(result.duration)
-        if result.succeeded {
-            Console.success("Built in \(elapsed)")
-        } else {
-            Console.error("Build failed after \(elapsed)")
-        }
+        guard result.succeeded else { return }
+        Console.success("Built in \(BuildTimer.format(result.duration))")
     }
 }

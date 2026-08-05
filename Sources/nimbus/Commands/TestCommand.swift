@@ -11,6 +11,15 @@ struct TestCommand: ParsableCommand {
     @Flag(name: .long, help: "Interactively select a simulator") var interactive = false
 
     mutating func run() throws {
+        let options = self.options
+        let interactive = self.interactive
+
+        try CommandRunner.run("test", json: options.json) {
+            try Self.perform(options: options, interactive: interactive)
+        }
+    }
+
+    private static func perform(options: SharedOptions, interactive: Bool) throws -> TestPayload {
         let config = try options.resolvedConfig()
 
         // Resolve a concrete simulator: without one, xcodebuild test runs with
@@ -18,16 +27,24 @@ struct TestCommand: ParsableCommand {
         let choice = try DeviceSelection.choose(
             config: config,
             interactive: interactive,
-            verbose: options.verbose
+            verbose: options.verbose,
+            json: options.json
         )
 
         Console.step("Testing \(config.scheme ?? "project")...")
 
         let runner = XcodeBuildRunner(config: config, destinationUDID: choice.device.udid)
-        let result = try BuildExecutor.execute(action: .test, runner: runner, verbose: options.verbose)
+        let execution = try BuildExecutor.execute(action: .test, runner: runner, verbose: options.verbose)
 
-        if !result.succeeded {
-            throw ExitCode.failure
+        guard execution.result.succeeded else {
+            throw BuildExecutor.failure(.testFailed, "Tests failed", from: execution)
         }
+
+        return TestPayload(
+            scheme: config.scheme,
+            configuration: config.configuration,
+            resolution: choice.resolution,
+            test: execution.result
+        )
     }
 }

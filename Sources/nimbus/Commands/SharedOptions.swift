@@ -19,6 +19,9 @@ struct SharedOptions: ParsableArguments {
     @Flag(name: .long, help: "Show verbose output")
     var verbose = false
 
+    @Flag(name: .long, help: "Emit a JSON result envelope on stdout instead of human output")
+    var json = false
+
     /// Load configs and merge: global < project < CLI flags.
     func resolvedConfig() throws -> NimbusConfig {
         let globalConfig = try ConfigLoader.loadGlobal()

@@ -19,6 +19,9 @@ struct DeviceOptions: ParsableArguments {
     @Flag(name: .long, help: "Show verbose output")
     var verbose = false
 
+    @Flag(name: .long, help: "Emit a JSON result envelope on stdout instead of human output")
+    var json = false
+
     /// Config for device selection only: global < project < CLI flags, with no
     /// scheme detection.
     func resolvedConfig() throws -> NimbusConfig {
@@ -33,7 +36,8 @@ struct DeviceOptions: ParsableArguments {
         try DeviceSelection.choose(
             config: try resolvedConfig(),
             interactive: interactive,
-            verbose: verbose
+            verbose: verbose,
+            json: json
         )
     }
 

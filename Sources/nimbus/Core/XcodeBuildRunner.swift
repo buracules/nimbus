@@ -1,7 +1,7 @@
 import Foundation
 
 /// What an xcodebuild action did. The caller decides how to say it.
-struct BuildResult {
+struct BuildResult: Codable {
     let succeeded: Bool
     let exitCode: Int32
     let duration: TimeInterval
@@ -11,7 +11,7 @@ struct BuildResult {
 ///
 /// The diagnostic fields exist so a caller can explain the route it took
 /// without this type printing anything.
-struct AppBundleLocation {
+struct AppBundleLocation: Codable {
     /// The app bundle to use, or nil when neither route found one on disk.
     let path: String?
     /// What `-showBuildSettings` reported; nil when it could not be read.
