@@ -47,7 +47,7 @@ struct SharedOptions: ParsableArguments {
 
         // If still no scheme, try auto-detection
         if merged.scheme == nil {
-            let projectFile = ProjectDetector.detectProjectFile()
+            let projectFile = ProjectIdentity.projectFile()
             let schemes = ProjectDetector.detectSchemes(
                 projectFlag: projectFile?.flag,
                 projectValue: projectFile?.value
@@ -93,7 +93,10 @@ struct SharedOptions: ParsableArguments {
         guard let first = schemes.first else { return nil }
 
         if let projectName {
-            let baseName = (projectName as NSString).deletingPathExtension
+            // `projectName` may arrive as a full path now that detection walks
+            // up, and "/a/b/MyApp" never equals a scheme name.
+            let baseName = ((projectName as NSString).lastPathComponent as NSString)
+                .deletingPathExtension
             if let match = schemes.first(where: { $0 == baseName }) {
                 return SchemeSelection(scheme: match, reason: "exactly matches project name '\(baseName)'")
             }

@@ -53,7 +53,10 @@ struct XcodeBuildRunner {
             args += ["-workspace", workspace]
         } else if let project = config.project {
             args += ["-project", project]
-        } else if let detected = ProjectDetector.detectProjectFile() {
+        } else if let detected = ProjectIdentity.projectFile() {
+            // An absolute path from the project root, not a bare name from the
+            // current directory: without it, a build started from a
+            // subdirectory of a project that has no nimbus.yml finds nothing.
             args += [detected.flag, detected.value]
         }
 
