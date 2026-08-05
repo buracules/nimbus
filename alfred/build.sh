@@ -19,6 +19,10 @@ target="${1:-$here/dist/nimbus.alfredworkflow}"
 
 python3 "$here/make-info-plist.py"
 
+# The workflow icon is generated rather than committed as a binary, so its
+# colour and weight stay editable without opening a drawing tool.
+swift "$here/make-icon.swift" "$source_dir/icon.png" >/dev/null
+
 # Fail loudly rather than shipping a workflow Alfred will refuse to load.
 /usr/bin/plutil -lint "$source_dir/info.plist" >/dev/null
 
