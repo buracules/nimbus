@@ -284,6 +284,12 @@ The skill provides:
 
 See [.claude/skills/nimbus/README.md](./.claude/skills/nimbus/README.md) for more details.
 
+## Decisions
+
+[docs/decisions](./docs/decisions/) records why nimbus is shaped the way it is —
+including the core/CLI boundary rule that `CoreBoundaryTests` enforces. Read it
+before proposing a change that the tests refuse.
+
 ## License
 
 MIT
