@@ -4,6 +4,11 @@ import XCTest
 /// The core/CLI boundary is a rule about ownership: core decides what happened,
 /// callers decide what the user is told. Two things make that rule checkable
 /// rather than aspirational, so check them.
+///
+/// If these tests refuse a change you want to make — in particular if the fix
+/// looks like giving core a reporter protocol — read
+/// `docs/decisions/0001-core-returns-values-callers-narrate.md` first. That
+/// alternative was considered and rejected on purpose.
 final class CoreBoundaryTests: XCTestCase {
     private var coreDirectory: String {
         // Tests/NimbusTests/CoreBoundaryTests.swift -> package root
