@@ -49,6 +49,9 @@ nimbus clean
 # List available simulators
 nimbus devices
 
+# Pin a simulator to this project, so later commands need no --device
+nimbus use "iPhone 17 Pro"
+
 # Control the simulator: screenshots, deep links, permissions, appearance...
 nimbus sim screenshot
 nimbus sim openurl "myapp://profile/42"
@@ -86,7 +89,38 @@ nimbus init --global
 
 The global config should only contain **user preferences** like `device`, `os`, `configuration`, and `xcbeautify`. Project-specific fields (`project`, `workspace`, `scheme`) should NOT be in global config — they're auto-detected from each directory, which ensures everything works correctly in git worktrees.
 
-**Priority chain**: CLI flags > project `nimbus.yml` > global `~/.config/nimbus/config.yml` > auto-detected > defaults
+### Pinning a Simulator
+
+`nimbus use` fixes a simulator for one project, so every later command in it
+targets the same one without a flag:
+
+```bash
+cd your-ios-project
+
+nimbus use "iPhone 17 Pro"     # pin it — add --os 26.2 to pin a version too
+nimbus use                     # what is in effect, and which layer supplied it
+nimbus use --clear             # forget it
+
+nimbus projects                # every project with a pin, most recent first
+```
+
+The name is resolved against the simulators on this machine *before* anything is
+remembered, so a typo fails here — with the usual suggestions — instead of a
+minute into a build.
+
+Nimbus remembers this outside your project. Nothing is written into your
+repository: a pin is yours, `nimbus.yml` is your team's.
+
+A pin outranks that `nimbus.yml`, so a committed `device:` can be shadowed.
+Nimbus says so when it happens, and `nimbus use` always names the layer the
+current device came from. A `--device` flag on an individual command still wins
+over both.
+
+The project a pin belongs to is the nearest directory at or above you holding a
+`nimbus.yml` or an `.xcworkspace`/`.xcodeproj` — so `use` works from a
+subdirectory, and two git worktrees get their own pins.
+
+**Priority chain**: CLI flags > `nimbus use` pin > project `nimbus.yml` > global `~/.config/nimbus/config.yml` > auto-detected > defaults
 
 ## Commands
 
@@ -100,6 +134,10 @@ The global config should only contain **user preferences** like `device`, `os`, 
 | `nimbus logs` | Stream logs from an app already running on the simulator |
 | `nimbus devices` | List available simulators |
 | `nimbus devices --all` | Include unavailable simulators, with the reason |
+| `nimbus use "<device>"` | Pin a simulator to this project (`--os` pins a version too) |
+| `nimbus use` | Show the simulator in effect and which layer supplied it |
+| `nimbus use --clear` | Forget this project's pinned simulator |
+| `nimbus projects` | List projects with a pinned simulator, most recent first |
 | `nimbus sim <subcommand>` | Control the simulator — see below |
 | `nimbus init` | Generate nimbus.yml from auto-detected settings |
 | `nimbus init --global` | Generate global config at ~/.config/nimbus/config.yml |
@@ -247,6 +285,7 @@ Neither accepts `--json` — see [JSON Output](#json-output).
 
 - **Auto-detection** — finds `.xcworkspace` > `.xcodeproj`, detects schemes via `xcodebuild -list`
 - **Smart device selection** — automatically picks the best available simulator, or use `--interactive` to choose
+- **Sticky simulators** — `nimbus use` pins one per project, remembered outside your repository
 - **Fuzzy matching** — typo in device name? Get helpful suggestions for similar devices
 - **Real-time logs** — stream app output directly from the simulator with `nimbus logs`
 - **Simulator control** — screenshots, recordings, deep links, push, permissions, appearance, status bar and location via `nimbus sim`
