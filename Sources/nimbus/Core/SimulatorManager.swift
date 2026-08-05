@@ -246,8 +246,12 @@ enum SimulatorManager {
             return runtimeMatches(group.runtime, os: os)
         }
 
-        // Extract all device names
-        let allDeviceNames = filteredGroups.flatMap { $0.devices.map { $0.name } }
+        // Extract device names, deduplicated: the same model exists on every
+        // installed runtime, and suggesting it three times helps nobody.
+        var seen = Set<String>()
+        let allDeviceNames = filteredGroups
+            .flatMap { $0.devices.map { $0.name } }
+            .filter { seen.insert($0).inserted }
 
         // Use FuzzyMatcher to find closest matches
         return FuzzyMatcher.findClosestMatches(target: query, candidates: allDeviceNames, maxResults: 3)
