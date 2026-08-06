@@ -12,7 +12,7 @@
 		<array>
 			<dict>
 				<key>destinationuid</key>
-				<string>1A1E2B00-0010-4000-A000-000000000010</string>
+				<string>1A1E2B00-0003-4000-A000-000000000003</string>
 				<key>modifiers</key>
 				<integer>0</integer>
 				<key>modifiersubtext</key>
@@ -60,6 +60,16 @@
 				<key>vitoclose</key>
 				<false/>
 			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>1A1E2B00-0015-4000-A000-000000000015</string>
+				<key>modifiers</key>
+				<integer>1310720</integer>
+				<key>modifiersubtext</key>
+				<string>Stream logs in a terminal</string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
 		</array>
 		<key>1A1E2B00-0002-4000-A000-000000000002</key>
 		<array>
@@ -74,11 +84,11 @@
 				<false/>
 			</dict>
 		</array>
-		<key>1A1E2B00-0010-4000-A000-000000000010</key>
+		<key>1A1E2B00-0003-4000-A000-000000000003</key>
 		<array>
 			<dict>
 				<key>destinationuid</key>
-				<string>1A1E2B00-0020-4000-A000-000000000020</string>
+				<string>1A1E2B00-0030-4000-A000-000000000030</string>
 				<key>modifiers</key>
 				<integer>0</integer>
 				<key>modifiersubtext</key>
@@ -139,6 +149,32 @@
 				<false/>
 			</dict>
 		</array>
+		<key>1A1E2B00-0015-4000-A000-000000000015</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>1A1E2B00-0031-4000-A000-000000000031</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>1A1E2B00-0040-4000-A000-000000000040</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>1A1E2B00-0020-4000-A000-000000000020</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
 	</dict>
 	<key>createdby</key>
 	<string>Burak Üstün</string>
@@ -186,7 +222,7 @@ exec ./projects.sh
 				<key>scriptfile</key>
 				<string></string>
 				<key>subtext</key>
-				<string>Pick a project, then ↵ run · ⌘ screenshot · ⌥ record · ⌃ appearance · ⌘⌥ simulator</string>
+				<string>Pick a project, then ↵ run · ⌘ screenshot · ⌥ record · ⌃ appearance · ⌘⌥ simulator · ⌘⌃ logs</string>
 				<key>title</key>
 				<string>nimbus projects</string>
 				<key>type</key>
@@ -255,27 +291,53 @@ exec ./devices.sh
 		<dict>
 			<key>config</key>
 			<dict>
-				<key>concurrently</key>
-				<false/>
+				<key>alfredfiltersresults</key>
+				<true/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<true/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
 				<key>escaping</key>
 				<integer>102</integer>
+				<key>keyword</key>
+				<string></string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string>Starting…</string>
 				<key>script</key>
 				<string>#!/bin/bash
-exec ./action-run.sh
+exec ./run-status.sh
 </string>
 				<key>scriptargtype</key>
 				<integer>1</integer>
 				<key>scriptfile</key>
 				<string></string>
+				<key>subtext</key>
+				<string>Build, install and launch</string>
+				<key>title</key>
+				<string>nimbus run</string>
 				<key>type</key>
 				<integer>0</integer>
+				<key>withspace</key>
+				<false/>
 			</dict>
 			<key>type</key>
-			<string>alfred.workflow.action.script</string>
+			<string>alfred.workflow.input.scriptfilter</string>
 			<key>uid</key>
-			<string>1A1E2B00-0010-4000-A000-000000000010</string>
+			<string>1A1E2B00-0003-4000-A000-000000000003</string>
 			<key>version</key>
-			<integer>2</integer>
+			<integer>3</integer>
 		</dict>
 		<dict>
 			<key>config</key>
@@ -376,6 +438,74 @@ exec ./action-use.sh
 			<string>1A1E2B00-0014-4000-A000-000000000014</string>
 			<key>version</key>
 			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>concurrently</key>
+				<false/>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>script</key>
+				<string>#!/bin/bash
+exec ./action-logs.sh
+</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>1A1E2B00-0015-4000-A000-000000000015</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>openwith</key>
+				<string></string>
+				<key>sourcefile</key>
+				<string></string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.openfile</string>
+			<key>uid</key>
+			<string>1A1E2B00-0030-4000-A000-000000000030</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>escaping</key>
+				<integer>0</integer>
+				<key>script</key>
+				<string>{query}</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.terminalcommand</string>
+			<key>uid</key>
+			<string>1A1E2B00-0031-4000-A000-000000000031</string>
+			<key>version</key>
+			<integer>0</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>triggerid</key>
+				<string>run-finished</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.trigger.external</string>
+			<key>uid</key>
+			<string>1A1E2B00-0040-4000-A000-000000000040</string>
+			<key>version</key>
+			<integer>1</integer>
 		</dict>
 		<dict>
 			<key>config</key>
@@ -493,6 +623,11 @@ Lists the projects that have a simulator pinned with `nimbus use`, newest pin fi
   ⌥↵   start a recording, or stop the one running
   ⌃↵   toggle light / dark
   ⌘⌥↵ change the simulator pinned to this project
+  ⌘⌃↵ stream this app's logs, in your terminal
+
+↵ keeps the Alfred window open and shows the build happening: a row that counts up while it runs, and then either what was launched or the compiler's own error lines. ↵ on that row opens the full log, ⇧ previews it without leaving Alfred. If you dismiss the window, a notification arrives when the build ends.
+
+Every action writes its whole output to a file under this workflow's cache folder; the newest 40 are kept. The “Last run” row at the top of the list is the way back to the most recent one.
 
 Nothing appears on the first run until you have pinned a simulator to at least one project. cd into an Xcode project and run:
 
@@ -508,16 +643,16 @@ Screenshots and recordings go to the Desktop unless screenshot_dir or recording_
 			<key>xpos</key>
 			<integer>40</integer>
 			<key>ypos</key>
-			<integer>240</integer>
+			<integer>300</integer>
 		</dict>
 		<key>1A1E2B00-0002-4000-A000-000000000002</key>
 		<dict>
 			<key>xpos</key>
 			<integer>300</integer>
 			<key>ypos</key>
-			<integer>620</integer>
+			<integer>765</integer>
 		</dict>
-		<key>1A1E2B00-0010-4000-A000-000000000010</key>
+		<key>1A1E2B00-0003-4000-A000-000000000003</key>
 		<dict>
 			<key>xpos</key>
 			<integer>300</integer>
@@ -550,6 +685,13 @@ Screenshots and recordings go to the Desktop unless screenshot_dir or recording_
 			<key>xpos</key>
 			<integer>540</integer>
 			<key>ypos</key>
+			<integer>765</integer>
+		</dict>
+		<key>1A1E2B00-0015-4000-A000-000000000015</key>
+		<dict>
+			<key>xpos</key>
+			<integer>300</integer>
+			<key>ypos</key>
 			<integer>620</integer>
 		</dict>
 		<key>1A1E2B00-0020-4000-A000-000000000020</key>
@@ -557,7 +699,7 @@ Screenshots and recordings go to the Desktop unless screenshot_dir or recording_
 			<key>xpos</key>
 			<integer>540</integer>
 			<key>ypos</key>
-			<integer>40</integer>
+			<integer>910</integer>
 		</dict>
 		<key>1A1E2B00-0021-4000-A000-000000000021</key>
 		<dict>
@@ -585,7 +727,28 @@ Screenshots and recordings go to the Desktop unless screenshot_dir or recording_
 			<key>xpos</key>
 			<integer>780</integer>
 			<key>ypos</key>
+			<integer>765</integer>
+		</dict>
+		<key>1A1E2B00-0030-4000-A000-000000000030</key>
+		<dict>
+			<key>xpos</key>
+			<integer>540</integer>
+			<key>ypos</key>
+			<integer>40</integer>
+		</dict>
+		<key>1A1E2B00-0031-4000-A000-000000000031</key>
+		<dict>
+			<key>xpos</key>
+			<integer>540</integer>
+			<key>ypos</key>
 			<integer>620</integer>
+		</dict>
+		<key>1A1E2B00-0040-4000-A000-000000000040</key>
+		<dict>
+			<key>xpos</key>
+			<integer>300</integer>
+			<key>ypos</key>
+			<integer>910</integer>
 		</dict>
 	</dict>
 	<key>userconfigurationconfig</key>

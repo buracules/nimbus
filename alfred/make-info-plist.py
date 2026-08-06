@@ -28,16 +28,20 @@ KEYWORD = "nim"
 # every rebuild look like a different workflow to Alfred's sync and to git.
 PROJECTS_FILTER = "1A1E2B00-0001-4000-A000-000000000001"
 DEVICES_FILTER = "1A1E2B00-0002-4000-A000-000000000002"
-ACTION_RUN = "1A1E2B00-0010-4000-A000-000000000010"
+RUN_FILTER = "1A1E2B00-0003-4000-A000-000000000003"
 ACTION_SCREENSHOT = "1A1E2B00-0011-4000-A000-000000000011"
 ACTION_RECORD = "1A1E2B00-0012-4000-A000-000000000012"
 ACTION_APPEARANCE = "1A1E2B00-0013-4000-A000-000000000013"
 ACTION_USE = "1A1E2B00-0014-4000-A000-000000000014"
+ACTION_LOGS = "1A1E2B00-0015-4000-A000-000000000015"
 NOTIFY_RUN = "1A1E2B00-0020-4000-A000-000000000020"
 NOTIFY_SCREENSHOT = "1A1E2B00-0021-4000-A000-000000000021"
 NOTIFY_RECORD = "1A1E2B00-0022-4000-A000-000000000022"
 NOTIFY_APPEARANCE = "1A1E2B00-0023-4000-A000-000000000023"
 NOTIFY_USE = "1A1E2B00-0024-4000-A000-000000000024"
+OPEN_LOG = "1A1E2B00-0030-4000-A000-000000000030"
+TERMINAL_LOGS = "1A1E2B00-0031-4000-A000-000000000031"
+TRIGGER_RUN_FINISHED = "1A1E2B00-0040-4000-A000-000000000040"
 
 # Alfred's modifier bitmask, as used in a connection's `modifiers` key.
 NO_MODIFIER = 0
@@ -45,6 +49,7 @@ CMD = 1048576
 ALT = 524288
 CTRL = 262144
 CMD_ALT = CMD | ALT
+CMD_CTRL = CMD | CTRL
 
 
 def script_filter(uid, keyword, title, subtext, running, scriptfile, argumenttype):
@@ -131,6 +136,53 @@ def notification(uid, title):
     }
 
 
+def open_file(uid):
+    """Open whatever path arrives, with whatever the user opens that kind of
+    file with.
+
+    Alfred's own object rather than `open` in a script: it is one less process,
+    and "the app the user chose for this" is a preference that belongs to the
+    system, not to this workflow.
+    """
+    return {
+        "config": {"openwith": "", "sourcefile": ""},
+        "type": "alfred.workflow.action.openfile",
+        "uid": uid,
+        "version": 3,
+    }
+
+
+def terminal_command(uid):
+    """Run whatever arrives, in the terminal the user has told Alfred about.
+
+    `escaping: 0` because the previous object hands this a complete, already
+    quoted command line. Letting Alfred escape it again would break the quoting
+    that makes a path with a space work.
+    """
+    return {
+        "config": {"escaping": 0, "script": "{query}"},
+        "type": "alfred.workflow.action.terminalcommand",
+        "uid": uid,
+        "version": 0,
+    }
+
+
+def external_trigger(uid, trigger_id):
+    """An entry point reachable from outside Alfred.
+
+    This is how a detached process gets a notification posted by Alfred rather
+    than by itself: `open -g alfred://runtrigger/<bundle>/<id>/?argument=...`.
+    Alfred is already permitted to notify and an osascript banner is attributed
+    to Script Editor, which may not be. `-g` keeps Alfred in the background.
+    """
+    return {
+        "config": {"triggerid": trigger_id},
+        "type": "alfred.workflow.trigger.external",
+        "uid": uid,
+        "version": 1,
+    }
+
+
 def connection(destination, modifiers=NO_MODIFIER, subtext=""):
     return {
         "destinationuid": destination,
@@ -145,7 +197,7 @@ OBJECTS = [
         PROJECTS_FILTER,
         KEYWORD,
         "nimbus projects",
-        "Pick a project, then ↵ run · ⌘ screenshot · ⌥ record · ⌃ appearance · ⌘⌥ simulator",
+        "Pick a project, then ↵ run · ⌘ screenshot · ⌥ record · ⌃ appearance · ⌘⌥ simulator · ⌘⌃ logs",
         "Reading nimbus projects…",
         "projects.sh",
         # Optional: the keyword works on its own, and the typed text filters.
@@ -160,11 +212,27 @@ OBJECTS = [
         "devices.sh",
         argumenttype=1,
     ),
-    run_script(ACTION_RUN, "action-run.sh"),
+    # ↵ leads here rather than to a Run Script, and that is the whole answer to
+    # "pressing enter looked like it did nothing". Actioning a row that leads to
+    # another Script Filter leaves the Alfred window open; a Run Script closes
+    # it. The build runs detached and this filter watches it.
+    script_filter(
+        RUN_FILTER,
+        None,
+        "nimbus run",
+        "Build, install and launch",
+        "Starting…",
+        "run-status.sh",
+        argumenttype=1,
+    ),
     run_script(ACTION_SCREENSHOT, "action-screenshot.sh"),
     run_script(ACTION_RECORD, "action-record.sh"),
     run_script(ACTION_APPEARANCE, "action-appearance.sh"),
     run_script(ACTION_USE, "action-use.sh"),
+    run_script(ACTION_LOGS, "action-logs.sh"),
+    open_file(OPEN_LOG),
+    terminal_command(TERMINAL_LOGS),
+    external_trigger(TRIGGER_RUN_FINISHED, "run-finished"),
     notification(NOTIFY_RUN, "nimbus run"),
     notification(NOTIFY_SCREENSHOT, "nimbus screenshot"),
     notification(NOTIFY_RECORD, "nimbus record"),
@@ -174,34 +242,45 @@ OBJECTS = [
 
 CONNECTIONS = {
     PROJECTS_FILTER: [
-        connection(ACTION_RUN, NO_MODIFIER, "Build and run"),
+        connection(RUN_FILTER, NO_MODIFIER, "Build and run"),
         connection(ACTION_SCREENSHOT, CMD, "Screenshot"),
         connection(ACTION_RECORD, ALT, "Start or stop recording"),
         connection(ACTION_APPEARANCE, CTRL, "Toggle light / dark"),
         connection(DEVICES_FILTER, CMD_ALT, "Change simulator"),
+        connection(ACTION_LOGS, CMD_CTRL, "Stream logs in a terminal"),
     ],
     DEVICES_FILTER: [connection(ACTION_USE)],
-    ACTION_RUN: [connection(NOTIFY_RUN)],
+    # Every actionable row in the run filter carries the same thing in `arg`:
+    # the path of that run's log.
+    RUN_FILTER: [connection(OPEN_LOG)],
     ACTION_SCREENSHOT: [connection(NOTIFY_SCREENSHOT)],
     ACTION_RECORD: [connection(NOTIFY_RECORD)],
     ACTION_APPEARANCE: [connection(NOTIFY_APPEARANCE)],
     ACTION_USE: [connection(NOTIFY_USE)],
+    ACTION_LOGS: [connection(TERMINAL_LOGS)],
+    # The run notification is fired by the detached build, not by a script
+    # Alfred is waiting on. It is the backstop for a dismissed window.
+    TRIGGER_RUN_FINISHED: [connection(NOTIFY_RUN)],
 }
 
 # Laid out left to right so the graph reads in the order it runs.
 UIDATA = {
-    PROJECTS_FILTER: {"xpos": 40, "ypos": 240},
-    DEVICES_FILTER: {"xpos": 300, "ypos": 620},
-    ACTION_RUN: {"xpos": 300, "ypos": 40},
+    PROJECTS_FILTER: {"xpos": 40, "ypos": 300},
+    RUN_FILTER: {"xpos": 300, "ypos": 40},
+    OPEN_LOG: {"xpos": 540, "ypos": 40},
     ACTION_SCREENSHOT: {"xpos": 300, "ypos": 185},
     ACTION_RECORD: {"xpos": 300, "ypos": 330},
     ACTION_APPEARANCE: {"xpos": 300, "ypos": 475},
-    ACTION_USE: {"xpos": 540, "ypos": 620},
-    NOTIFY_RUN: {"xpos": 540, "ypos": 40},
+    ACTION_LOGS: {"xpos": 300, "ypos": 620},
+    TERMINAL_LOGS: {"xpos": 540, "ypos": 620},
+    DEVICES_FILTER: {"xpos": 300, "ypos": 765},
+    ACTION_USE: {"xpos": 540, "ypos": 765},
     NOTIFY_SCREENSHOT: {"xpos": 540, "ypos": 185},
     NOTIFY_RECORD: {"xpos": 540, "ypos": 330},
     NOTIFY_APPEARANCE: {"xpos": 540, "ypos": 475},
-    NOTIFY_USE: {"xpos": 780, "ypos": 620},
+    NOTIFY_USE: {"xpos": 780, "ypos": 765},
+    TRIGGER_RUN_FINISHED: {"xpos": 300, "ypos": 910},
+    NOTIFY_RUN: {"xpos": 540, "ypos": 910},
 }
 
 # Exposed in Alfred's workflow configuration so the three things that are a
@@ -233,7 +312,16 @@ PLIST = {
         "  ⌘↵   screenshot the simulator\n"
         "  ⌥↵   start a recording, or stop the one running\n"
         "  ⌃↵   toggle light / dark\n"
-        "  ⌘⌥↵ change the simulator pinned to this project\n\n"
+        "  ⌘⌥↵ change the simulator pinned to this project\n"
+        "  ⌘⌃↵ stream this app's logs, in your terminal\n\n"
+        "↵ keeps the Alfred window open and shows the build happening: a row "
+        "that counts up while it runs, and then either what was launched or the "
+        "compiler's own error lines. ↵ on that row opens the full log, ⇧ "
+        "previews it without leaving Alfred. If you dismiss the window, a "
+        "notification arrives when the build ends.\n\n"
+        "Every action writes its whole output to a file under this workflow's "
+        "cache folder; the newest 40 are kept. The “Last run” row at the top of "
+        "the list is the way back to the most recent one.\n\n"
         "Nothing appears on the first run until you have pinned a simulator to "
         "at least one project. cd into an Xcode project and run:\n\n"
         "  nimbus use \"iPhone 17 Pro\"\n\n"

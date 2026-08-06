@@ -34,19 +34,17 @@ cd "$(dirname "$0")" || exit 1
 # shellcheck source=lib.sh
 . ./lib.sh
 
-action_require_tools || exit 0
-require_project_root || exit 0
+run_log_begin "record" "${projectName:-}"
 
-STATE_DIR="${alfred_workflow_cache:-${TMPDIR:-/tmp}/nimbus-alfred}"
-mkdir -p "$STATE_DIR" 2>/dev/null || {
-    echo "Cannot write to $STATE_DIR, so a recording cannot be tracked."
-    exit 0
-}
+action_require_tools || finish fail "$ACTION_ERROR"
+require_project_root || finish fail "$ACTION_ERROR"
 
-# One set of state files per project. Hashed because a path contains slashes.
-# `/usr/bin/shasum` by absolute path: /opt/homebrew/bin comes first on Alfred's
-# PATH and Homebrew's perl puts its own shasum there.
-KEY="$(printf '%s' "$projectRoot" | /usr/bin/shasum -a 256 | cut -c1-16)"
+STATE_DIR="$(workflow_state_dir)" || finish fail "Alfred's cache directory for this workflow could not be created, so a recording cannot be tracked."
+
+# One set of state files per project. The key is hashed because a path contains
+# slashes; see project_key in lib.sh. These live in the cache root while a run's
+# state lives in runs-state/, so the two never share a filename.
+KEY="$(project_key "$projectRoot")"
 PID_FILE="$STATE_DIR/$KEY.pid"
 OUT_FILE="$STATE_DIR/$KEY.out"
 ERR_FILE="$STATE_DIR/$KEY.err"
@@ -68,10 +66,7 @@ acquire_lock() {
     return 1
 }
 
-acquire_lock || {
-    echo "Another recording action is already running for this project."
-    exit 0
-}
+acquire_lock || finish fail "Another recording action is already running for this project."
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
 # --- is the handle still good? ----------------------------------------------
@@ -109,8 +104,7 @@ if recording_is_alive "$pid"; then
     waited=0
     while recording_is_alive "$pid"; do
         if [ "$waited" -ge 300 ]; then
-            echo "Asked the recording to stop, but it is still finishing. The movie will appear at $(cat "$DEST_FILE" 2>/dev/null)."
-            exit 0
+            finish fail "Asked the recording to stop, but it is still finishing. The movie will appear at $(cat "$DEST_FILE" 2>/dev/null)."
         fi
         sleep 0.2
         waited=$((waited + 1))
@@ -118,15 +112,17 @@ if recording_is_alive "$pid"; then
 
     envelope="$(cat "$OUT_FILE" 2>/dev/null)"
     clear_handle
+    run_log_section "nimbus sim record --json (stdout)" "$envelope"
+    run_log_section "nimbus narration (stderr)" "$(cat "$ERR_FILE" 2>/dev/null)"
 
     if [ "$(envelope_field "$envelope" '.ok')" = "true" ]; then
         path="$(envelope_field "$envelope" '.data.file.path')"
         device="$(envelope_field "$envelope" '.data.resolution.device.name')"
-        echo "Recording of ${device:-the simulator} saved to ${path:-unknown location}"
+        REC_DEVICE="$device"
+        finish ok "Recording of ${device:-the simulator} saved to ${path:-unknown location}"
     else
-        echo "$(envelope_error_line "$envelope" "The recording stopped but nimbus reported nothing readable")"
+        finish fail "$(envelope_error_line "$envelope" "The recording stopped but nimbus reported nothing readable")"
     fi
-    exit 0
 fi
 
 # --- the handle was stale ---------------------------------------------------
@@ -141,8 +137,8 @@ if [ -n "$pid" ]; then
     envelope="$(cat "$OUT_FILE" 2>/dev/null)"
     clear_handle
     if [ -n "$envelope" ] && [ "$(envelope_field "$envelope" '.ok')" != "true" ]; then
-        echo "$(envelope_error_line "$envelope" "The previous recording ended unexpectedly")"
-        exit 0
+        run_log_section "the previous recording's last words" "$envelope"
+        finish fail "$(envelope_error_line "$envelope" "The previous recording ended unexpectedly")"
     fi
 fi
 
@@ -181,8 +177,9 @@ if ! recording_is_alive "$pid"; then
     # simctl's own words through. Rather than decode exit numbers here and be
     # wrong about the ones that mean something else, name the usual cause
     # without claiming it is this one.
-    echo "Recording did not start — ${reason:-nimbus exited immediately}. A simulator can only be recorded once at a time; check whether something else is already recording it."
-    exit 0
+    run_log_section "nimbus sim record --json (stdout)" "$envelope"
+    run_log_section "nimbus narration (stderr)" "$(cat "$ERR_FILE" 2>/dev/null)"
+    finish fail "Recording did not start — ${reason:-nimbus exited immediately}. A simulator can only be recorded once at a time; check whether something else is already recording it."
 fi
 
-echo "Recording to $dest — press ⌥↵ on the same project to stop"
+finish ok "Recording to $dest — press ⌥↵ on the same project to stop"

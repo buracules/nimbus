@@ -16,31 +16,39 @@ cd "$(dirname "$0")" || exit 1
 # shellcheck source=lib.sh
 . ./lib.sh
 
-action_require_tools || exit 0
-require_project_root || exit 0
+run_log_begin "use" "${projectName:-}"
+
+action_require_tools || finish fail "$ACTION_ERROR"
+require_project_root || finish fail "$ACTION_ERROR"
 
 if [ -z "${useDevice:-}" ]; then
-    echo "No simulator was chosen."
-    exit 0
+    finish fail "No simulator was chosen."
 fi
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
 
 if [ -n "${useOS:-}" ]; then
-    envelope="$(cd "$projectRoot" && "$NIMBUS" use "$useDevice" --os "$useOS" --json 2>/dev/null)"
+    envelope="$(cd "$projectRoot" && "$NIMBUS" use "$useDevice" --os "$useOS" --json 2>"$scratch/err")"
 else
-    envelope="$(cd "$projectRoot" && "$NIMBUS" use "$useDevice" --json 2>/dev/null)"
+    envelope="$(cd "$projectRoot" && "$NIMBUS" use "$useDevice" --json 2>"$scratch/err")"
 fi
 
+run_log_section "nimbus use --json (stdout)" "$envelope"
+run_log_section "nimbus narration (stderr)" "$(cat "$scratch/err" 2>/dev/null)"
+
 if [ "$(envelope_field "$envelope" '.ok')" != "true" ]; then
-    echo "$(envelope_error_line "$envelope" "nimbus use failed and said nothing readable")"
-    exit 0
+    REC_EXIT="$(envelope_field "$envelope" '.error.exitCode')"
+    finish fail "$(envelope_error_line "$envelope" "nimbus use failed and said nothing readable")"
 fi
 
 device="$(envelope_field "$envelope" '.data.device')"
 os="$(envelope_field "$envelope" '.data.os')"
-name="${projectName:-$(basename "$projectRoot")}"
+name="${projectName:-${projectRoot##*/}}"
+REC_DEVICE="$device"
 
 if [ -n "$os" ]; then
-    echo "$name is pinned to $device (OS $os)"
+    finish ok "$name is pinned to $device (OS $os)"
 else
-    echo "$name is pinned to $device"
+    finish ok "$name is pinned to $device"
 fi

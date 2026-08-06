@@ -59,6 +59,36 @@ fi
 icons="$(icon_map_for_envelope "$envelope")"
 [ -n "$icons" ] || icons='{}'
 
+# The way back to the last thing this workflow did.
+#
+# A notification is gone the moment it is dismissed, and a build has more to say
+# than a banner holds. This row is the door to the log, and it costs nothing to
+# open: one shell read of a small file — no fork, no extra jq, nothing added to
+# the path this filter is measured on. A cache directory that is missing or a
+# record that is not JSON both come out as "no row", which is correct.
+last_raw=""
+last_file="${alfred_workflow_cache:-${TMPDIR:-/tmp}/nimbus-alfred}/last-run.json"
+[ -f "$last_file" ] && last_raw="$(< "$last_file")"
+
+# Is the run that record describes still happening?
+#
+# This list holds no handle on any run — the project's own view is where
+# liveness is properly decided, with a PID file and a check on what that process
+# actually is. But a record left saying "running" by a crash or a reboot would
+# otherwise make this row claim a build is in progress forever, and that is a lie
+# the user has no reason to doubt. `kill -0` is a shell builtin, so asking costs
+# nothing on the path this filter is measured on, and the answer is right in
+# every case except a recycled PID.
+last_pid=""
+case "$last_raw" in
+    *'"pid":'*) last_pid="${last_raw#*\"pid\":}"; last_pid="${last_pid%%,*}" ;;
+esac
+last_alive=0
+case "$last_pid" in
+    ''|0|*[!0-9]*) ;;
+    *) kill -0 "$last_pid" 2>/dev/null && last_alive=1 ;;
+esac
+
 # Nothing here checks whether a project root still exists. `nimbus projects`
 # already drops entries whose directory is gone, and re-deriving that would be a
 # second opinion about a fact nimbus states. The race it leaves — a directory
@@ -67,6 +97,8 @@ icons="$(icon_map_for_envelope "$envelope")"
 printf '%s' "$envelope" | jq \
     --arg home "$HOME" \
     --arg shotdir "${screenshot_dir:-$HOME/Desktop}" \
+    --arg lastRaw "$last_raw" \
+    --argjson lastAlive "$last_alive" \
     --argjson icons "$icons" \
     '
     def shorten($p):
@@ -82,12 +114,61 @@ printf '%s' "$envelope" | jq \
           else { icon: { type: $i.type, path: $i.path } }
           end;
 
-    { items: (.data.projects | map(
+    ($lastRaw | try fromjson catch null) as $last
+
+    # The one row that is not a project. `intent` is what the run filter reads
+    # to tell "the user asked for this project to be built" from "the user asked
+    # to see what already happened" — the same destination, two questions.
+    | def last_run_row:
+        if $last == null then []
+        else
+          ($last.phase == "running" and $lastAlive == 1) as $live
+          | ($last.phase == "running" and $lastAlive != 1) as $abandoned
+          | [ { title: (
+                (if $live then "Running now · ⟳ "
+                 elif $abandoned or (($last.ok // false) | not) then "Last run · ✗ "
+                 else "Last run · ✓ " end)
+                + ($last.action // "run")
+                + (if ($last.projectName // "") != "" then " on " + $last.projectName else "" end)
+              ),
+              # The arrow leads so that the one thing this row offers survives a
+              # headline long enough to be truncated — which a compiler error,
+              # or a saved file path, reliably is.
+              subtitle: ("↵ show the whole output   ·   "
+                         + (if $abandoned then "It stopped without reporting"
+                            else ($last.headline // "") end)),
+              match: "last run log output result "
+                     + ($last.projectName // "") + " " + ($last.action // ""),
+              arg: ($last.log // ""),
+              valid: true,
+              variables: { intent: "show" },
+              icon: (if ($last.ok // false) or $live
+                     then { path: "icon.png" }
+                     else { path: "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/AlertStopIcon.icns" }
+                     end),
+              # Every modifier on this row belongs to a project, and this row is
+              # not one. Saying so beats firing a screenshot at no project.
+              mods: {
+                cmd:       { valid: false, subtitle: "Nothing here — this row is a result, not a project" },
+                alt:       { valid: false, subtitle: "Nothing here — this row is a result, not a project" },
+                ctrl:      { valid: false, subtitle: "Nothing here — this row is a result, not a project" },
+                "cmd+alt": { valid: false, subtitle: "Nothing here — this row is a result, not a project" },
+                "cmd+ctrl":{ valid: false, subtitle: "Nothing here — this row is a result, not a project" }
+              } } ]
+        end;
+
+    # A failure, or a run happening right now, is news and goes first. A run that
+    # succeeded is history and goes last, out of the way of the project the user
+    # actually came here to press.
+    (if $last != null and (($last.ok // false) | not) then last_run_row else [] end) as $leading
+    | (if $last != null and (($last.ok // false)) then last_run_row else [] end) as $trailing
+
+    | { items: ($leading + (.data.projects | map(
         .projectRoot as $root
         | .device as $device
         | (.os | if . then " (OS " + . + ")" else "" end) as $ostag
         | (($root | split("/") | last) // $root) as $name
-        | ({ projectRoot: $root, projectName: $name, projectDevice: $device }) as $vars
+        | ({ projectRoot: $root, projectName: $name, projectDevice: $device, intent: "run" }) as $vars
         | icon_for($root) + {
             title: $name,
             subtitle: ("Build and run on " + $device + $ostag + "  ·  " + shorten($root)),
@@ -123,8 +204,13 @@ printf '%s' "$envelope" | jq \
                     subtitle: ("Change the simulator pinned to " + $name),
                     arg: $root,
                     variables: $vars
+                },
+                "cmd+ctrl": {
+                    subtitle: ("Stream " + $name + " logs in a terminal"),
+                    arg: $root,
+                    variables: $vars
                 }
             }
           }
-      )) }
+      )) + $trailing) }
     '
