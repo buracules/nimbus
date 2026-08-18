@@ -52,16 +52,24 @@ CMD_ALT = CMD | ALT
 CMD_CTRL = CMD | CTRL
 
 
-def script_filter(uid, keyword, title, subtext, running, scriptfile, argumenttype):
-    """A Script Filter that lets Alfred do the filtering.
+def script_filter(uid, keyword, title, subtext, running, scriptfile,
+                  argumenttype, alfred_filters=True):
+    """A Script Filter, optionally letting Alfred do the filtering.
 
-    `alfredfiltersresults` is what keeps this fast: the script runs once when
-    the keyword is entered, not once per keystroke. `nimbus devices --json`
-    takes about a quarter of a second, which is fine once and miserable per
-    character.
+    `alfredfiltersresults` is what keeps the keyword filter fast: the script
+    runs once when the keyword is entered, not once per keystroke. `nimbus
+    devices --json` takes about a quarter of a second, which is fine once and
+    miserable per character.
+
+    It must be OFF for a filter reached by a connection rather than by typing.
+    Alfred seeds such a filter's query with the actioned item's `arg` — here a
+    project's absolute path — and then matches every row against it. No status
+    row contains its own project's path, so Alfred filtered all of them away
+    and the screen went blank while the path sat in the search field. That is
+    the bug that made pressing return look like it did nothing.
     """
     config = {
-        "alfredfiltersresults": True,
+        "alfredfiltersresults": alfred_filters,
         "alfredfiltersresultsmatchmode": 0,
         "argumenttreatemptyqueryasnil": True,
         "argumenttrimmode": 0,
@@ -211,6 +219,8 @@ OBJECTS = [
         "Reading simulators…",
         "devices.sh",
         argumenttype=1,
+        # Reached by ⌘⌥, so the query is the project path, not a device name.
+        alfred_filters=False,
     ),
     # ↵ leads here rather than to a Run Script, and that is the whole answer to
     # "pressing enter looked like it did nothing". Actioning a row that leads to
@@ -224,6 +234,8 @@ OBJECTS = [
         "Starting…",
         "run-status.sh",
         argumenttype=1,
+        # Reached by ↵, so the query is the project path. See script_filter.
+        alfred_filters=False,
     ),
     run_script(ACTION_SCREENSHOT, "action-screenshot.sh"),
     run_script(ACTION_RECORD, "action-record.sh"),
