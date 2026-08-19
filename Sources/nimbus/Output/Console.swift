@@ -26,12 +26,40 @@ enum Console {
         isMachineReadable = enabled
     }
 
-    private static var colorsEnabled: Bool {
-        !isMachineReadable && isatty(fileno(stdout)) != 0
+    /// The stream a line actually lands on. Colour is decided per stream
+    /// because narration and errors do not share a destination: `error()`
+    /// always writes to stderr, which may be a terminal while stdout is piped.
+    enum Stream {
+        case out
+        case err
     }
 
-    static func colored(_ text: String, _ color: Color) -> String {
-        guard colorsEnabled else { return text }
+    /// Neither the environment nor a file descriptor's tty-ness changes while
+    /// the process runs, so both are resolved once rather than per emitted line.
+    private static let noColorRequested = ProcessInfo.processInfo.environment["NO_COLOR"] != nil
+    private static let stdoutIsTerminal = isatty(fileno(stdout)) != 0
+    private static let stderrIsTerminal = isatty(fileno(stderr)) != 0
+
+    /// The colour decision, as a pure function of its inputs so it can be
+    /// tested without a terminal or a mutated environment.
+    ///
+    /// `NO_COLOR` follows the https://no-color.org convention: any value, even
+    /// an empty one, disables colour.
+    static func shouldColor(noColor: Bool, machineReadable: Bool, isTerminal: Bool) -> Bool {
+        guard !noColor, !machineReadable else { return false }
+        return isTerminal
+    }
+
+    private static func colorsEnabled(on stream: Stream) -> Bool {
+        shouldColor(
+            noColor: noColorRequested,
+            machineReadable: isMachineReadable,
+            isTerminal: stream == .out ? stdoutIsTerminal : stderrIsTerminal
+        )
+    }
+
+    static func colored(_ text: String, _ color: Color, on stream: Stream = .out) -> String {
+        guard colorsEnabled(on: stream) else { return text }
         return "\(color.rawValue)\(text)\(Color.reset.rawValue)"
     }
 
@@ -64,7 +92,7 @@ enum Console {
 
     static func error(_ message: String) {
         var stderr = FileHandle.standardError
-        print("\(colored("✗", .red)) \(message)", to: &stderr)
+        print("\(colored("✗", .red, on: .err)) \(message)", to: &stderr)
     }
 
     static func step(_ message: String) {
