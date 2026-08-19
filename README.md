@@ -8,13 +8,13 @@ Nimbus wraps `xcodebuild` and `xcrun simctl` with a clean interface, auto-detect
 
 ```bash
 # Build from source
-git clone https://github.com/user/nimbus.git
+git clone https://github.com/buracules/nimbus.git
 cd nimbus
 swift build -c release
 cp .build/release/nimbus /usr/local/bin/
 
 # Or with Mint
-mint install user/nimbus
+mint install buracules/nimbus
 ```
 
 ## Quick Start
